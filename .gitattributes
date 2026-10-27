@@ -1,0 +1,11 @@
+* text=auto
+*.ts text eol=lf
+*.ets text eol=lf
+*.mjs text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.json5 text eol=lf
+*.ps1 text eol=crlf
+*.docx binary
+*.png binary
+*.pdf binary

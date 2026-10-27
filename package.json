@@ -1,0 +1,12 @@
+{
+  "name": "campus-agent-workspace",
+  "version": "0.1.0",
+  "private": true,
+  "description": "四人协作的 ArkUI-X AI Agent 应用框架；Node 仅用于共享逻辑验证",
+  "engines": { "node": ">=22.13.0" },
+  "scripts": {
+    "demo": "node --disable-warning=ExperimentalWarning scripts/demo.mjs",
+    "test": "node --disable-warning=ExperimentalWarning --test tests/framework.test.mjs",
+    "check": "node --disable-warning=ExperimentalWarning scripts/check.mjs"
+  }
+}
