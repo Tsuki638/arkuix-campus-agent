@@ -10,7 +10,9 @@ const { ToolRegistry } = await core.load('agent/ToolRegistry.ts');
 const { StudyPlanTool } = await core.load('agent/tools/StudyPlanTool.ts');
 const { MockModelClient } = await core.load('services/model/MockModelClient.ts');
 const { CompatibleModelClient } = await core.load('services/model/CompatibleModelClient.ts');
+const { trimContext, DEFAULT_MAX_CONTEXT_CHARS } = await core.load('services/model/ContextTrimmer.ts');
 const { JsonSessionRepository } = await core.load('services/storage/JsonSessionRepository.ts');
+const { StudyDataRepository } = await core.load('services/storage/StudyDataRepository.ts');
 const { MemoryKeyValueStore } = await core.load('services/storage/MemoryKeyValueStore.ts');
 const { createMockRuntime } = await core.load('bootstrap/Runtime.ts');
 const { makeMessage } = await core.load('contracts/Models.ts');
@@ -212,4 +214,95 @@ test('内置模拟运行时明确标记语音未接入', async () => {
   assert.equal(runtime.speech.isAvailable(), false);
   await assert.rejects(runtime.speech.recognizeOnce(), /SPEECH_UNAVAILABLE/);
   await assert.rejects(runtime.speech.speak('hello'), /SPEECH_UNAVAILABLE/);
+});
+
+test('传输异常收敛为固定 MODEL_* 错误码，且不透传原始报文', async () => {
+  const cases = [
+    ['HTTP 401 Unauthorized', /MODEL_AUTH/],
+    ['invalid_api_key', /MODEL_AUTH/],
+    ['HTTP 429 Too Many Requests', /MODEL_RATE_LIMIT/],
+    ['connect ETIMEDOUT', /MODEL_TIMEOUT/],
+    ['The operation was aborted', /MODEL_TIMEOUT/],
+    ['HTTP 502 Bad Gateway', /MODEL_HTTP/],
+    ['getaddrinfo ENOTFOUND model.example', /MODEL_TRANSPORT/]
+  ];
+  for (const [message, pattern] of cases) {
+    const model = new CompatibleModelClient({ post: async () => { throw new Error(message); } }, settings);
+    await assert.rejects(model.complete([makeMessage('user', 'hi')], []), pattern, message);
+  }
+  // 传输层已分类的错误码原样透传，不二次改写。
+  const passthrough = new CompatibleModelClient(
+    { post: async () => { throw new Error('MODEL_RATE_LIMIT: 模型服务限流，请稍后重试。'); } }, settings);
+  await assert.rejects(passthrough.complete([makeMessage('user', 'hi')], []),
+    /^Error: MODEL_RATE_LIMIT: 模型服务限流，请稍后重试。$/);
+});
+
+test('上下文裁剪保留系统消息并按工具分组丢弃最早历史，不拆散配对', async () => {
+  const system = makeMessage('system', 'S');
+  const assistant = makeMessage('assistant', '');
+  assistant.toolCalls = [{ id: 'call-x', name: 'create_study_plan', input: '{}' }];
+  const tool = makeMessage('tool', 'result');
+  tool.toolCallId = 'call-x';
+  const recent = makeMessage('user', '最近一条');
+  const budget = system.content.length + assistant.content.length + 20 + tool.content.length + recent.content.length;
+  const trimmed = trimContext([system, assistant, tool, recent], budget - 1);
+  assert.deepEqual(trimmed.map((m) => m.role), ['system', 'assistant', 'tool', 'user']);
+  // 预算不足以容纳工具组时，整组一起丢弃，绝不留下孤立的 tool 结果。
+  const tight = trimContext([system, assistant, tool, recent],
+    system.content.length + recent.content.length + 1);
+  assert.deepEqual(tight.map((m) => m.role), ['system', 'user']);
+  assert.equal(tight.some((m) => m.role === 'tool'), false);
+  assert.ok(DEFAULT_MAX_CONTEXT_CHARS > 0);
+});
+
+test('适配器按上下文预算裁剪后再发送，保留系统消息与最新用户输入', async () => {
+  let request;
+  const transport = { post: async (value) => {
+    request = value;
+    return JSON.stringify({ choices: [{ message: { role: 'assistant', content: 'ok' } }] });
+  } };
+  const model = new CompatibleModelClient(transport, settings, { maxContextChars: 40 });
+  const system = makeMessage('system', 'SYS');
+  const history = Array.from({ length: 20 }, (_, i) => makeMessage('user', `历史消息${i}内容较长`.repeat(3)));
+  const latest = makeMessage('user', '最新');
+  await model.complete([system, ...history, latest], []);
+  const payload = JSON.parse(request.body);
+  assert.equal(payload.messages[0].role, 'system');
+  assert.equal(payload.messages[payload.messages.length - 1].content, '最新');
+  assert.ok(payload.messages.length < history.length + 2);
+  assert.throws(() => new CompatibleModelClient(transport, settings, { maxContextChars: 0 }), /MODEL_CONFIG/);
+});
+
+test('学习数据仓库独立于会话存储，可持久化计划与打卡并跨实例读取', async () => {
+  const store = new MemoryKeyValueStore();
+  const repo = new StudyDataRepository(store);
+  const plan = { id: 'plan-1', createdAt: 10,
+    conditions: { goal: '高数', dailyMinutes: 60, startDate: '2026-10-28' },
+    tasks: [{ id: 't1', title: '第一章', day: 1, status: 'pending' },
+      { id: 't2', title: '第二章', day: 2, status: 'pending' }] };
+  await repo.addPlan(plan);
+  await repo.updateTask('plan-1', 't1', 'done');
+  await repo.addRecord({ planId: 'plan-1', taskId: 't1', completedAt: 99 });
+  // 会话仓库与学习仓库使用不同 key，互不覆盖。
+  const sessions = new JsonSessionRepository(store);
+  await sessions.save({ id: 's1', title: '会话', updatedAt: 1, messages: [] });
+  const reopened = new StudyDataRepository(store);
+  const loaded = await reopened.getPlan('plan-1');
+  assert.equal(loaded.tasks.find((t) => t.id === 't1').status, 'done');
+  assert.equal(loaded.tasks.find((t) => t.id === 't2').status, 'pending');
+  assert.equal((await reopened.listRecords('plan-1')).length, 1);
+  assert.equal((await sessions.list()).length, 1);
+  await assert.rejects(reopened.updateTask('missing', 't1', 'done'), /STUDY_NOT_FOUND/);
+  await assert.rejects(reopened.updateTask('plan-1', 'missing', 'done'), /STUDY_NOT_FOUND/);
+});
+
+test('学习数据损坏或版本不兼容时拒绝覆盖原始文件', async () => {
+  for (const raw of ['{broken', '{"version":2,"plans":[],"records":[]}',
+    '{"version":1,"plans":[{"id":"p","createdAt":1,"conditions":null,"tasks":[]}],"records":[]}']) {
+    const store = new MemoryKeyValueStore();
+    await store.set('study_data_v1', raw);
+    const repo = new StudyDataRepository(store);
+    await assert.rejects(repo.listPlans(), /STORAGE_CORRUPT/);
+    assert.equal(await store.get('study_data_v1'), raw);
+  }
 });

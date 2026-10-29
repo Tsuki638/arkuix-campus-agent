@@ -1,5 +1,41 @@
 import type { JsonTransport, ModelClient } from '../../contracts/Ports';
 import type { ChatMessage, JsonRequest, ModelReply, ModelSettings, ToolCall, ToolDefinition } from '../../contracts/Models';
+import { DEFAULT_MAX_CONTEXT_CHARS, trimContext } from './ContextTrimmer';
+
+export interface ModelClientOptions {
+  // 送入模型的上下文预算（字符），超过后按工具分组丢弃最早历史。
+  maxContextChars?: number;
+}
+
+// 把传输层与模型返回的原始异常收敛为固定的 MODEL_* 错误码，
+// 既保留成员 D 在 OhosJsonTransport 里已抛出的分类，也覆盖断网/超时等未分类情况。
+// 只输出面向用户的中文说明，绝不透传供应商响应或密钥。
+const KNOWN_CODES: string[] = ['MODEL_CONFIG', 'MODEL_AUTH', 'MODEL_RATE_LIMIT',
+  'MODEL_TIMEOUT', 'MODEL_HTTP', 'MODEL_TRANSPORT', 'MODEL_RESPONSE'];
+
+function classifyTransportError(error: Error): Error {
+  const message: string = error.message || '';
+  for (const code of KNOWN_CODES) {
+    if (message.startsWith(code + ':')) { return error; }
+  }
+  const lower: string = message.toLowerCase();
+  if (/\b(401|403)\b/.test(message) || lower.includes('invalid_api_key') || lower.includes('unauthorized') ||
+    lower.includes('forbidden')) {
+    return new Error('MODEL_AUTH: 模型鉴权失败，请检查运行时密钥。');
+  }
+  if (/\b429\b/.test(message) || lower.includes('rate limit') || lower.includes('throttl') ||
+    lower.includes('too many requests')) {
+    return new Error('MODEL_RATE_LIMIT: 模型服务限流，请稍后重试。');
+  }
+  if (lower.includes('timeout') || lower.includes('etimedout') || lower.includes('aborted') ||
+    lower.includes('abort') || message.includes('超时')) {
+    return new Error('MODEL_TIMEOUT: 模型请求超时，请检查网络后重试。');
+  }
+  if (/http\s*\d{3}/i.test(message) || lower.includes('bad gateway') || lower.includes('service unavailable')) {
+    return new Error('MODEL_HTTP: 模型请求失败，服务暂时不可用，请稍后重试。');
+  }
+  return new Error('MODEL_TRANSPORT: 无法连接模型服务，请检查网络后重试。');
+}
 
 interface WireFunctionCall { name: string; arguments: string; }
 interface WireToolCall { id: string; type: string; function: WireFunctionCall; }
@@ -25,20 +61,27 @@ interface WireResponse { choices: WireChoice[]; }
 export class CompatibleModelClient implements ModelClient {
   private transport: JsonTransport;
   private settings: ModelSettings;
+  private maxContextChars: number;
 
-  constructor(transport: JsonTransport, settings: ModelSettings) {
+  constructor(transport: JsonTransport, settings: ModelSettings, options: ModelClientOptions = {}) {
     if (!/^https:\/\/[^\s]+$/.test(settings.endpoint) || settings.model.trim().length === 0 ||
       settings.apiKey.trim().length === 0) {
       throw new Error('MODEL_CONFIG: 请提供 HTTPS 接口、模型名称和运行时密钥。');
     }
+    const budget: number = options.maxContextChars === undefined ? DEFAULT_MAX_CONTEXT_CHARS : options.maxContextChars;
+    if (!Number.isInteger(budget) || budget < 1) {
+      throw new Error('MODEL_CONFIG: 上下文预算必须是正整数。');
+    }
     this.transport = transport;
     this.settings = settings;
+    this.maxContextChars = budget;
   }
 
   async complete(messages: ChatMessage[], tools: ToolDefinition[]): Promise<ModelReply> {
+    const trimmed: ChatMessage[] = trimContext(messages, this.maxContextChars);
     const payload: WireRequest = {
       model: this.settings.model,
-      messages: messages.map((message: ChatMessage): WireMessage => {
+      messages: trimmed.map((message: ChatMessage): WireMessage => {
         const wire: WireMessage = { role: message.role, content: message.content };
         if (message.toolCalls.length > 0) {
           wire.tool_calls = message.toolCalls.map((call: ToolCall): WireToolCall => {
@@ -60,7 +103,12 @@ export class CompatibleModelClient implements ModelClient {
     const request: JsonRequest = {
       url: this.settings.endpoint, body: JSON.stringify(payload), bearerToken: this.settings.apiKey
     };
-    const raw: string = await this.transport.post(request);
+    let raw: string;
+    try {
+      raw = await this.transport.post(request);
+    } catch (error) {
+      throw classifyTransportError(error as Error);
+    }
     try {
       const response: WireResponse = JSON.parse(raw) as WireResponse;
       if (response === null || !Array.isArray(response.choices) || response.choices.length === 0 ||
