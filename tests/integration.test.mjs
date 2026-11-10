@@ -81,7 +81,7 @@ test('学习数据损坏时工具明确失败，保留原数据和会话可用�
   const result = await runtime.agent.send(conversation.id, '高数|2');
   const toolResult = JSON.parse(result.conversation.messages.find((message) => message.role === 'tool').content);
   assert.equal(toolResult.success, false);
-  assert.match(result.reply, /工具未完成/);
+  assert.match(result.reply, /本轮规划未完成.*STORAGE_CORRUPT/);
   assert.equal(await store.get('study_data_v1'), '{broken');
   assert.equal((await runtime.sessions.list()).length, 1);
 });

@@ -5,7 +5,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 export const workspace = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const sourceRoot = path.join(workspace, 'app', 'entry', 'src', 'main', 'ets');
-const outputRoot = path.join(workspace, '.generated', 'core');
+const outputRoot = path.join(workspace, '.generated', 'core', String(process.pid));
 
 async function sourceFiles(directory) {
   const result = [];

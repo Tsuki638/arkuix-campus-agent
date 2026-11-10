@@ -1,5 +1,6 @@
 import type { AgentTool } from '../contracts/Ports';
 import type { ToolDefinition, ToolResult } from '../contracts/Models';
+import type { ToolContext } from '../contracts/LearningModels';
 
 export class ToolRegistry {
   private tools: Map<string, AgentTool> = new Map<string, AgentTool>();
@@ -18,13 +19,13 @@ export class ToolRegistry {
     return result;
   }
 
-  async execute(name: string, input: string): Promise<ToolResult> {
+  async execute(name: string, input: string, context?: ToolContext): Promise<ToolResult> {
     const tool: AgentTool | undefined = this.tools.get(name);
     if (tool === undefined) {
       return { name: name, success: false, content: 'UNKNOWN_TOOL: 未注册的工具，请使用已声明的工具。' };
     }
     try {
-      return await tool.execute(input);
+      return await tool.execute(input, context);
     } catch {
       return { name: name, success: false, content: 'TOOL_FAILED: 工具执行失败，请检查参数或向用户澄清。' };
     }

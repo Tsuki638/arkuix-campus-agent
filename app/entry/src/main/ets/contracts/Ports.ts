@@ -1,5 +1,6 @@
 import type { AgentResult, AgentState, ChatMessage, Conversation, JsonRequest,
   ModelReply, ToolDefinition, ToolResult } from './Models';
+import type { ToolContext } from './LearningModels';
 
 export interface ModelClient {
   complete(messages: ChatMessage[], tools: ToolDefinition[]): Promise<ModelReply>;
@@ -7,7 +8,7 @@ export interface ModelClient {
 
 export interface AgentTool {
   definition(): ToolDefinition;
-  execute(input: string): Promise<ToolResult>;
+  execute(input: string, context?: ToolContext): Promise<ToolResult>;
 }
 
 export interface SessionRepository {

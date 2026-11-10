@@ -25,6 +25,12 @@ function setup(model = new MockModelClient(), maxSteps = 4) {
   return { store, sessions, registry, agent: new AgentEngine(model, registry, sessions, maxSteps) };
 }
 
+function studyInput(overrides = {}) {
+  return { goal: '复习高数', days: 3, minutesPerDay: 90,
+    tasks: [{ name: '极限', minutes: 60 }, { name: '导数', minutes: 90 },
+      { name: '积分', minutes: 120 }], ...overrides };
+}
+
 test('两轮对话保留上下文，工具调用及结果配对，能够回看与删除', async () => {
   const runtime = createMockRuntime();
   const session = await runtime.agent.createConversation();
@@ -32,7 +38,7 @@ test('两轮对话保留上下文，工具调用及结果配对，能够回看�
   assert.equal(first.state, 'completed');
   assert.match(first.reply, /第 1 轮/);
   const states = [];
-  const second = await runtime.agent.send(session.id, '复习高数|3', (state) => states.push(state));
+  const second = await runtime.agent.send(session.id, JSON.stringify(studyInput()), (state) => states.push(state));
   assert.equal(second.state, 'completed');
   assert.match(second.reply, /第 3 天/);
   assert.deepEqual(states, ['thinking', 'using_tool', 'thinking', 'completed']);
@@ -51,7 +57,194 @@ test('工具参数拒绝非法 JSON、空目标和越界天数', async () => {
     '{"goal":"高数","days":0}', '{"goal":"高数","days":31}', '{"goal":"高数","days":1.5}']) {
     assert.equal((await tool.execute(input)).success, false, input);
   }
-  assert.equal((await tool.execute('{"goal":"高数","days":1}')).success, true);
+  assert.equal((await tool.execute(JSON.stringify(studyInput()))).success, true);
+});
+
+test('学习计划按输入顺序跨天拆分，三天各 90 分钟且总计 270 分钟', async () => {
+  const result = await new StudyPlanTool().execute(JSON.stringify(studyInput()));
+  assert.equal(result.success, true);
+  assert.match(result.content, /第 1 天（90\/90 分钟）：极限 60 分钟；导数 30 分钟/);
+  assert.match(result.content, /第 2 天（90\/90 分钟）：导数 60 分钟；积分 30 分钟/);
+  assert.match(result.content, /第 3 天（90\/90 分钟）：积分 90 分钟/);
+  assert.match(result.content, /预计任务总时长：270 分钟/);
+});
+
+test('空闲天不虚构任务，单个长任务能正确跨天分配', async () => {
+  const tool = new StudyPlanTool();
+  const spare = await tool.execute(JSON.stringify(studyInput({ days: 2, minutesPerDay: 60,
+    tasks: [{ name: '订正错题', minutes: 30 }] })));
+  assert.equal(spare.success, true);
+  assert.match(spare.content, /第 1 天（30\/60 分钟）：订正错题 30 分钟/);
+  assert.match(spare.content, /第 2 天（0\/60 分钟）：未安排任务/);
+  assert.match(spare.content, /剩余可用时间：90 分钟/);
+  const long = await tool.execute(JSON.stringify(studyInput({ days: 2, minutesPerDay: 60,
+    tasks: [{ name: '积分', minutes: 120 }] })));
+  assert.equal(long.success, true);
+  assert.match(long.content, /第 1 天（60\/60 分钟）：积分 60 分钟/);
+  assert.match(long.content, /第 2 天（60\/60 分钟）：积分 60 分钟/);
+});
+
+test('时间不足报告准确缺口，不生成超额的完整计划', async () => {
+  const result = await new StudyPlanTool().execute(JSON.stringify(studyInput({ minutesPerDay: 30,
+    tasks: [{ name: '复习', minutes: 360 }] })));
+  assert.equal(result.success, false);
+  assert.match(result.content, /INSUFFICIENT_TIME/);
+  assert.match(result.content, /可用 90 分钟/);
+  assert.match(result.content, /缺少 270 分钟/);
+  assert.doesNotMatch(result.content, /第 1 天/);
+});
+
+test('缺少规划条件时明确列出需补充字段，不猜测每日时间或任务', async () => {
+  const result = await new StudyPlanTool().execute('{"goal":"高数","days":3}');
+  assert.equal(result.success, false);
+  assert.match(result.content, /MISSING_FIELDS/);
+  assert.match(result.content, /minutesPerDay/);
+  assert.match(result.content, /tasks/);
+});
+
+test('目标与任务名称按 Unicode 字符计数，与工具 schema 长度约束一致', async () => {
+  const tool = new StudyPlanTool();
+  const valid = await tool.execute(JSON.stringify(studyInput({ goal: '📚'.repeat(200),
+    tasks: [{ name: '📚'.repeat(100), minutes: 1 }] })));
+  assert.equal(valid.success, true);
+  for (const input of [studyInput({ goal: '📚'.repeat(201) }),
+    studyInput({ tasks: [{ name: '📚'.repeat(101), minutes: 1 }] })]) {
+    assert.equal((await tool.execute(JSON.stringify(input))).success, false);
+  }
+});
+
+test('工具拒绝错误类型、越界时间、空任务和未声明字段', async () => {
+  const invalid = [[], 'text', 3, true, studyInput({ extra: 1 }),
+    studyInput({ goal: '' }), studyInput({ goal: ' ' }), studyInput({ goal: null }),
+    studyInput({ goal: '学'.repeat(201) }), studyInput({ days: 0 }), studyInput({ days: 31 }),
+    studyInput({ days: 1.5 }), studyInput({ days: '3' }), studyInput({ days: null }),
+    studyInput({ minutesPerDay: 0 }),
+    studyInput({ minutesPerDay: 1441 }), studyInput({ minutesPerDay: 1.5 }),
+    studyInput({ minutesPerDay: '90' }), studyInput({ tasks: [] }), studyInput({ tasks: null }),
+    studyInput({ tasks: {} }), studyInput({ tasks: [null] }), studyInput({ tasks: [[]] }),
+    studyInput({ tasks: [{ name: ' ', minutes: 30 }] }),
+    studyInput({ tasks: [{ name: '题'.repeat(101), minutes: 30 }] }),
+    studyInput({ tasks: [{ name: '题', minutes: 0 }] }),
+    studyInput({ tasks: [{ name: '题', minutes: 1.5 }] }),
+    studyInput({ tasks: [{ name: '题', minutes: '30' }] }),
+    studyInput({ tasks: [{ name: '题', minutes: 43201 }] }),
+    studyInput({ tasks: [{ name: '题', minutes: 30, extra: true }] }),
+    studyInput({ tasks: Array.from({ length: 51 }, () => ({ name: '题', minutes: 1 })) })];
+  for (const input of invalid) {
+    assert.equal((await new StudyPlanTool().execute(JSON.stringify(input))).success, false,
+      JSON.stringify(input));
+  }
+});
+
+test('分轮补充条件后继承目标，调用的实际工具参数和结果正确配对', async () => {
+  const runtime = createMockRuntime();
+  const session = await runtime.agent.createConversation();
+  const first = await runtime.agent.send(session.id, '{"goal":"复习高数"}');
+  assert.equal(first.state, 'completed');
+  assert.match(first.reply, /days/);
+  assert.equal(first.conversation.messages.some((message) => message.role === 'tool'), false);
+  const { goal, ...remaining } = studyInput();
+  const second = await runtime.agent.send(session.id, JSON.stringify(remaining));
+  assert.equal(second.state, 'completed');
+  assert.match(second.reply, /第 3 天（90\/90 分钟）：积分 90 分钟/);
+  const call = second.conversation.messages.find((message) => message.toolCalls.length > 0).toolCalls[0];
+  assert.equal(JSON.parse(call.input).goal, '复习高数');
+  const toolMessage = second.conversation.messages.find((message) => message.role === 'tool');
+  assert.equal(toolMessage.toolCallId, call.id);
+  assert.equal(JSON.parse(toolMessage.content).success, true);
+});
+
+test('修改每日时间保留任务，时间不足后增加天数可恢复，其他会话不继承参数', async () => {
+  const runtime = createMockRuntime();
+  const session = await runtime.agent.createConversation();
+  await runtime.agent.send(session.id, JSON.stringify(studyInput()));
+  const reduced = await runtime.agent.send(session.id, '{"minutesPerDay":60}');
+  assert.equal(reduced.state, 'failed');
+  assert.match(reduced.error, /缺少 90 分钟/);
+  const recovered = await runtime.agent.send(session.id, '{"days":5}');
+  assert.equal(recovered.state, 'completed');
+  assert.match(recovered.reply, /学习目标：复习高数/);
+  assert.match(recovered.reply, /第 5 天（30\/60 分钟）：积分 30 分钟/);
+  const other = await runtime.agent.createConversation();
+  const isolated = await runtime.agent.send(other.id, '{"days":5}');
+  assert.match(isolated.reply, /goal/);
+  assert.equal(isolated.conversation.messages.some((message) => message.role === 'tool'), false);
+});
+
+test('工具执行失败时，即使模型误报成功也必须显示真实失败', async () => {
+  const model = { complete: async (messages) => messages.at(-1).role === 'tool' ?
+    { content: '已成功生成完整计划', toolCalls: [] } :
+    { content: '', toolCalls: [{ id: 'call-fail', name: 'create_study_plan',
+      input: JSON.stringify(studyInput({ minutesPerDay: 1 })) }] } };
+  const { agent } = setup(model);
+  const session = await agent.createConversation();
+  const result = await agent.send(session.id, '生成计划');
+  assert.equal(result.state, 'failed');
+  assert.match(result.error, /INSUFFICIENT_TIME/);
+  assert.doesNotMatch(result.reply, /已成功/);
+  assert.equal(result.conversation.messages.some((message) => message.content === '已成功生成完整计划'), false);
+});
+
+test('工具返回空的失败说明也不能被当成执行成功', async () => {
+  const registry = new ToolRegistry();
+  registry.register({ definition: () => ({ name: 'silent_failure', description: '', parametersJson: '{}' }),
+    execute: async () => ({ name: 'silent_failure', success: false, content: '' }) });
+  const model = { complete: async (messages) => messages.at(-1).role === 'tool' ?
+    { content: '已完成', toolCalls: [] } :
+    { content: '', toolCalls: [{ id: 'silent-1', name: 'silent_failure', input: '{}' }] } };
+  const agent = new AgentEngine(model, registry, new JsonSessionRepository(new MemoryKeyValueStore()));
+  const session = await agent.createConversation();
+  const result = await agent.send(session.id, '执行');
+  assert.equal(result.state, 'failed');
+  assert.match(result.error, /TOOL_FAILED/);
+});
+
+test('无关工具成功不能清除尚未修正的学习规划失败', async () => {
+  const registry = new ToolRegistry();
+  registry.register(new StudyPlanTool());
+  registry.register({ definition: () => ({ name: 'other_tool', description: '', parametersJson: '{}' }),
+    execute: async () => ({ name: 'other_tool', success: true, content: '其他操作完成' }) });
+  let attempt = 0;
+  const model = { complete: async () => {
+    attempt++;
+    if (attempt === 1) return { content: '', toolCalls: [{ id: 'plan-fail', name: 'create_study_plan',
+      input: JSON.stringify(studyInput({ minutesPerDay: 1 })) }] };
+    if (attempt === 2) return { content: '', toolCalls: [{ id: 'other-ok', name: 'other_tool', input: '{}' }] };
+    return { content: '全部学习任务已成功安排', toolCalls: [] };
+  } };
+  const agent = new AgentEngine(model, registry, new JsonSessionRepository(new MemoryKeyValueStore()));
+  const session = await agent.createConversation();
+  const result = await agent.send(session.id, '规划');
+  assert.equal(result.state, 'failed');
+  assert.match(result.error, /INSUFFICIENT_TIME/);
+  assert.doesNotMatch(result.reply, /已成功安排/);
+});
+
+test('工具参数在本轮被修正后可以完成，不保留已经恢复的失败状态', async () => {
+  let attempt = 0;
+  const model = { complete: async () => {
+    attempt++;
+    if (attempt <= 2) return { content: '', toolCalls: [{ id: `repair-${attempt}`,
+      name: 'create_study_plan', input: JSON.stringify(studyInput(attempt === 1 ? { days: 0 } : {})) }] };
+    return { content: '已按确认条件生成计划', toolCalls: [] };
+  } };
+  const { agent } = setup(model);
+  const session = await agent.createConversation();
+  const result = await agent.send(session.id, '生成计划');
+  assert.equal(result.state, 'completed');
+  const results = result.conversation.messages.filter((message) => message.role === 'tool')
+    .map((message) => JSON.parse(message.content).success);
+  assert.deepEqual(results, [false, true]);
+  assert.equal(result.error, '');
+});
+
+test('模型抛出非 Error 值时返回可理解的失败并释放会话锁', async () => {
+  const { agent } = setup({ complete: async () => { throw null; } });
+  const session = await agent.createConversation();
+  const first = await agent.send(session.id, '规划');
+  assert.equal(first.state, 'failed');
+  assert.match(first.error, /AGENT_FAILED/);
+  assert.equal((await agent.send(session.id, '重试')).state, 'failed');
 });
 
 test('未知工具和抛错工具返回失败结果，不伪造成功', async () => {
@@ -188,6 +381,8 @@ test('模型适配器发送工具 schema 和调用 ID，密钥仅用于请求头
   const payload = JSON.parse(request.body);
   assert.equal(payload.stream, false);
   assert.equal(payload.tools[0].function.parameters.type, 'object');
+  assert.equal(payload.tools[0].function.parameters.properties.minutesPerDay.type, 'integer');
+  assert.equal(payload.tools[0].function.parameters.properties.tasks.items.properties.minutes.type, 'integer');
   const assistant = makeMessage('assistant', '');
   assistant.toolCalls = reply.toolCalls;
   const tool = makeMessage('tool', '{"success":true}');
