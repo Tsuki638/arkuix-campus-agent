@@ -6,7 +6,8 @@
   "engines": { "node": ">=22.13.0" },
   "scripts": {
     "demo": "node --disable-warning=ExperimentalWarning scripts/demo.mjs",
-    "test": "node --disable-warning=ExperimentalWarning --test tests/framework.test.mjs",
+    "test": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 tests/framework.test.mjs tests/speech.test.mjs tests/integration.test.mjs",
+    "verify:model": "node --disable-warning=ExperimentalWarning scripts/verify-model.mjs",
     "check": "node --disable-warning=ExperimentalWarning scripts/check.mjs"
   }
 }

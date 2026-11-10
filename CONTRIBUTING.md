@@ -14,12 +14,12 @@ npm run check
 
 | 成员 | 建议分支 | 主要目录 |
 | --- | --- | --- |
-| A 你 | `feat/agent` | `app/entry/src/main/ets/agent/` |
+| A | `feat/agent` | `app/entry/src/main/ets/agent/` |
 | B | `feat/ui` | `app/entry/src/main/ets/ui/`、`pages/` |
 | C | `feat/services` | `app/entry/src/main/ets/services/` |
-| D | `feat/platform` | `app/entry/src/main/ets/platform/`、工程配置和 `scripts/` |
+| 你（D，语音模块） | `feat/platform` | `app/entry/src/main/ets/platform/speech/`、语音自测页、语音检查与准备脚本 |
 
-每个人的详细任务、交付物和验收标准见 [分工说明](docs/四人分工与里程碑.md) 和 [Word 任务文档](docs/项目四人分工与具体任务.docx)。
+当前分工以 [分工说明](docs/四人分工与里程碑.md) 为准：A 负责 Agent，B 负责 UI，C 负责模型与数据，你负责语音模块。平台工程、日历适配与构建打包的负责人另行明确。[Word 任务文档](docs/项目四人分工与具体任务.docx) 为历史导出，人员分工可能尚未同步。
 
 以 A 开始开发为例：
 
@@ -47,7 +47,7 @@ git push -u origin feat/agent
 
 ## 工程文件与配置
 
-- D 统一生成并尽早提交官方 ArkUI-X 工程配置，其他成员同步同一套模板与 SDK 组合。
+- 平台工程负责人统一生成并尽早提交官方 ArkUI-X 工程配置，其他成员同步同一套模板与 SDK 组合。
 - 本机 SDK 路径、模型密钥、签名证书、构建产物和 `.generated/` 不加入提交。
 - 密钥通过运行时配置传入；日志、截图和会话历史中不记录密钥。
 - `.gitattributes` 统一文本换行，Word 等二进制文件按二进制处理。
