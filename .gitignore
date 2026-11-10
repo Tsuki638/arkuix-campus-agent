@@ -5,6 +5,8 @@ oh_modules/
 .idea/
 **/build/
 **/.gradle/
+**/assets/arkui-x/
+app/.arkui-x/android/app/libs/
 **/local.properties
 **/local.*.json
 .env

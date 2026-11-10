@@ -3,13 +3,12 @@ import { ModelSettings } from '../contracts/Models';
 import { ModelClient, SpeechService } from '../contracts/Ports';
 import { MockModelClient } from '../services/model/MockModelClient';
 import { CompatibleModelClient } from '../services/model/CompatibleModelClient';
-import { JsonSessionRepository } from '../services/storage/JsonSessionRepository';
 import { FileKeyValueStore } from '../services/storage/FileKeyValueStore';
 import { OhosJsonTransport } from '../platform/network/OhosJsonTransport';
 import { UnavailableSpeechService } from '../platform/speech/UnavailableSpeechService';
-import { AppRuntime } from './Runtime';
+import { AppRuntime, createRuntime } from './Runtime';
 
-// 唯一装配点：成员 C 提供 settings，成员 D 注入已实现的语音服务。
+// 唯一装配点：C/B 提供 settings，语音负责人提供 speech；两个仓库共用设备文件端口。
 // 不在共享 UI/Agent 中判断操作系统，也不复制两套业务。
 export function createDeviceRuntime(context: common.Context, settings?: ModelSettings,
   speech?: SpeechService): AppRuntime {
@@ -17,8 +16,15 @@ export function createDeviceRuntime(context: common.Context, settings?: ModelSet
   if (settings !== undefined) {
     model = new CompatibleModelClient(new OhosJsonTransport(), settings);
   }
-  return new AppRuntime(model,
-    new JsonSessionRepository(new FileKeyValueStore(context.filesDir)),
+  return createRuntime(model, new FileKeyValueStore(context.filesDir),
     speech === undefined ? new UnavailableSpeechService() : speech,
     settings === undefined ? '离线模拟模型 · 本地文件历史' : '云端模型 · 本地文件历史');
+}
+
+export function configureDeviceModel(runtime: AppRuntime, settings?: ModelSettings): void {
+  // 先校验并构造成功，再替换；无效配置不会破坏当前可用模型。
+  const model: ModelClient = settings === undefined ? new MockModelClient() :
+    new CompatibleModelClient(new OhosJsonTransport(), settings);
+  runtime.replaceModel(model, settings === undefined ? '离线模拟模型 · 本地文件历史' :
+    '云端模型 · 本地文件历史');
 }

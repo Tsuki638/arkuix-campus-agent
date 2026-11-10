@@ -13,3 +13,10 @@ for (const text of ['我想准备下周的考试', '复习高数|3']) {
 }
 console.log(`会话数：${(await runtime.sessions.list()).length}`);
 console.log(`历史消息数：${(await runtime.sessions.get(conversation.id)).messages.length}`);
+const plans = await runtime.study.listPlans();
+console.log(`已保存学习计划：${plans.length} 份`);
+if (plans.length > 0) {
+  await runtime.study.setTaskCompletion(plans[0].id, plans[0].tasks[0].id, true);
+  console.log(`第一项任务：${(await runtime.study.getPlan(plans[0].id)).tasks[0].status}`);
+  console.log(`打卡记录：${(await runtime.study.listRecords(plans[0].id)).length} 条`);
+}

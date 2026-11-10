@@ -1,0 +1,6 @@
+{
+  "crossplatform": true, "buildOption": { "ignoreCrossPlatform": true,},
+  "modules": [
+    "entry"
+  ]
+}
