@@ -10,7 +10,15 @@
                    },
                    {
                        "name":  "EntryAbility_label",
-                       "value":  "label"
+                       "value":  "学习规划助手"
+                   },
+                   {
+                       "name": "calendar_read_reason",
+                       "value": "用于查询本应用创建的学习日程，避免重复添加"
+                   },
+                   {
+                       "name": "calendar_write_reason",
+                       "value": "用于在你确认后将学习安排添加到系统日历"
                    },
                    {
                        "name":  "microphone_reason",

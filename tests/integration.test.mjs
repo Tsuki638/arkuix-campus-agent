@@ -9,6 +9,54 @@ const { MockModelClient } = await core.load('services/model/MockModelClient.ts')
 const { MemoryKeyValueStore } = await core.load('services/storage/MemoryKeyValueStore.ts');
 const { StudyDataRepository } = await core.load('services/storage/StudyDataRepository.ts');
 const { UnavailableSpeechService } = await core.load('platform/speech/UnavailableSpeechService.ts');
+const { DeepSeekConfig } = await core.load('services/model/DeepSeekConfig.ts');
+
+test('DeepSeek 非思考模式完成工具往返及第二轮对话，通用接口不携带供应商参数', async () => {
+  const store = new MemoryKeyValueStore();
+  const requests = [];
+  const transport = { post: async (request) => {
+    const payload = JSON.parse(request.body);
+    requests.push(payload);
+    assert.equal(payload.thinking.type, 'disabled');
+    assert.equal(payload.max_tokens, 2048);
+    if (requests.length === 1) {
+      return JSON.stringify({ choices: [{ message: { role: 'assistant', content: null,
+        tool_calls: [{ id: 'deepseek-plan', type: 'function', function: {
+          name: 'create_study_plan', arguments: '{"goal":"复习高数","days":3}'
+        } }] } }] });
+    }
+    const toolResult = payload.messages.find((message) => message.role === 'tool');
+    assert.equal(toolResult.tool_call_id, 'deepseek-plan');
+    assert.equal(JSON.parse(toolResult.content).success, true);
+    assert.equal(payload.messages.filter((message) => message.tool_calls?.length).length, 1);
+    if (requests.length === 3) {
+      assert.equal(payload.messages.filter((message) => message.role === 'user').length, 2);
+      assert.equal(payload.messages.at(-1).content, '刚才是什么计划？');
+    }
+    return JSON.stringify({ choices: [{ message: { role: 'assistant', content: '高数复习计划，共 3 天。' } }] });
+  } };
+  const client = new CompatibleModelClient(transport, {
+    endpoint: DeepSeekConfig.endpoint, model: DeepSeekConfig.model, apiKey: 'test-secret-only'
+  });
+  const runtime = createRuntime(client, store, new UnavailableSpeechService(), 'DeepSeek 测试');
+  const session = await runtime.agent.createConversation();
+  assert.equal((await runtime.agent.send(session.id, '创建 3 天高数计划')).state, 'completed');
+  assert.equal((await runtime.agent.send(session.id, '刚才是什么计划？')).state, 'completed');
+  assert.equal(requests.length, 3);
+  assert.equal((await runtime.study.listPlans())[0].tasks.length, 3);
+  assert.equal((await store.get('sessions_v1')).includes('test-secret-only'), false);
+
+  for (const endpoint of ['https://example.invalid/chat/completions',
+    'https://api.deepseek.com.example.invalid/chat/completions']) {
+    const generic = new CompatibleModelClient({ post: async (request) => {
+      const payload = JSON.parse(request.body);
+      assert.equal(payload.thinking, undefined);
+      assert.equal(payload.max_tokens, undefined);
+      return JSON.stringify({ choices: [{ message: { role: 'assistant', content: '通用接口正常' } }] });
+    } }, { endpoint, model: 'generic', apiKey: 'test-only' });
+    await generic.complete([], []);
+  }
+});
 
 test('识别文本经模型适配器调用工具、回传结果，计划与打卡可跨运行时恢复', async () => {
   const store = new MemoryKeyValueStore();

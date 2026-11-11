@@ -1,6 +1,7 @@
 import type { JsonTransport, ModelClient } from '../../contracts/Ports';
 import type { ChatMessage, JsonRequest, ModelReply, ModelSettings, ToolCall, ToolDefinition } from '../../contracts/Models';
 import { DEFAULT_MAX_CONTEXT_CHARS, trimContext } from './ContextTrimmer';
+import { DeepSeekConfig, isOfficialDeepSeekEndpoint } from './DeepSeekConfig';
 
 export interface ModelClientOptions {
   // 送入模型的上下文预算（字符），超过后按工具分组丢弃最早历史。
@@ -47,17 +48,21 @@ interface WireMessage {
 }
 interface WireFunctionDefinition { name: string; description: string; parameters: Object; }
 interface WireTool { type: string; function: WireFunctionDefinition; }
+interface WireThinking { type: string; }
 interface WireRequest {
   model: string;
   messages: WireMessage[];
   stream: boolean;
   tools?: WireTool[];
+  thinking?: WireThinking;
+  max_tokens?: number;
 }
 interface WireChoice { message: WireMessage; }
 interface WireResponse { choices: WireChoice[]; }
 
 // 使用常见的 Chat Completions / Function Calling 协议，不绑定模型厂商。
-// 供应商专有参数（如思考开关）由成员 C 按选定模型文档扩展此适配层。
+// DeepSeek 官方接口显式关闭思考模式，使用现有工具消息协议完成往返。
+// 思考模式的 reasoning_content 回传尚未实现，不把缺失字段的请求交给默认模式。
 export class CompatibleModelClient implements ModelClient {
   private transport: JsonTransport;
   private settings: ModelSettings;
@@ -93,6 +98,10 @@ export class CompatibleModelClient implements ModelClient {
       }),
       stream: false
     };
+    if (isOfficialDeepSeekEndpoint(this.settings.endpoint)) {
+      payload.thinking = { type: 'disabled' };
+      payload.max_tokens = DeepSeekConfig.maxOutputTokens;
+    }
     if (tools.length > 0) {
       payload.tools = tools.map((tool: ToolDefinition): WireTool => {
         return { type: 'function', function: {
