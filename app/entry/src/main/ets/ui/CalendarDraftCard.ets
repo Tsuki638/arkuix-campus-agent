@@ -1,6 +1,7 @@
 import { CalendarDraft, CalendarEntry, CalendarEventInput } from '../contracts/Calendar';
 import { calendarTimeText, calendarInputTime } from '../services/calendar/CalendarTime';
 import { WorkspaceIcon } from './WorkspaceIcon';
+import { describeAgentError } from '../services/model/ErrorText';
 import { WorkspaceTheme as T } from './WorkspaceTheme';
 
 @Component
@@ -34,7 +35,7 @@ export struct CalendarDraftCard {
         reminderMinutes: this.editReminder.trim() ? this.editReminder.split(',').map((value: string) => Number(value.trim())) : [],
         taskId: event.taskId, description: event.description };
       if (await this.onEdit(this.draft, event.id, input)) { this.editingId = ''; }
-    } catch (error) { this.editError = (error as Error).message || '时间格式无效。'; }
+    } catch (error) { this.editError = describeAgentError((error as Error).message, '时间格式无效，请按 YYYY-MM-DD HH:mm 填写。'); }
   }
   private statusText(): string {
     if (this.draft.status === 'completed') { return '已添加到系统日历'; }

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, writeFile, rename } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, writeFile, rename } from 'node:fs/promises';
 import path from 'node:path';
 import { compileCore, workspace } from '../scripts/compile-core.mjs';
 
@@ -15,6 +15,7 @@ const { JsonSessionRepository } = await core.load('services/storage/JsonSessionR
 const { StudyDataRepository } = await core.load('services/storage/StudyDataRepository.ts');
 const { MemoryKeyValueStore } = await core.load('services/storage/MemoryKeyValueStore.ts');
 const { createMockRuntime } = await core.load('bootstrap/Runtime.ts');
+const { describeAgentError, errorCodeOf, needsModelSettings } = await core.load('services/model/ErrorText.ts');
 const { makeMessage } = await core.load('contracts/Models.ts');
 
 function setup(model = new MockModelClient(), maxSteps = 4) {
@@ -305,4 +306,135 @@ test('学习数据损坏或版本不兼容时拒绝覆盖原始文件', async ()
     await assert.rejects(repo.listPlans(), /STORAGE_CORRUPT/);
     assert.equal(await store.get('study_data_v1'), raw);
   }
+});
+
+// ===== 界面错误文案（GitHub #6 失败反馈 / #7 存储异常反馈）=====
+
+test('界面文案去掉英文错误码前缀，并给出可继续操作的提示', () => {
+  const cases = [
+    ['MODEL_CONFIG: 请提供 HTTPS 接口、模型名称和运行时密钥。', /模型设置/],
+    ['MODEL_AUTH: 模型鉴权失败，请检查运行时密钥。', /重新填写/],
+    ['MODEL_TIMEOUT: 模型请求超时，请检查网络后重试。', /重新发送/],
+    ['MODEL_TRANSPORT: 无法连接模型服务，请检查网络后重试。', /离线计划与历史/],
+    ['MODEL_RATE_LIMIT: 模型服务限流，请稍后重试。', /稍等片刻/],
+    ['STORAGE_CORRUPT: 会话文件损坏或版本不兼容。请先备份，避免覆盖历史。', /备份/],
+    ['CALENDAR_STORAGE: 日历记录损坏或版本不兼容，已保留原始数据。', /保留原始数据/],
+    ['SPEECH_PERMISSION_DENIED: 未获得麦克风权限。', /继续用文字输入/],
+    ['CALENDAR_UNAVAILABLE: Android 暂不支持', /应用内日程草案/]
+  ];
+  for (const [raw, pattern] of cases) {
+    const text = describeAgentError(raw);
+    assert.match(text, pattern, raw);
+    assert.doesNotMatch(text, /^[A-Z][A-Z_]+:/, raw);
+    assert.ok(text.length > 0, raw);
+  }
+  assert.equal(describeAgentError(''), '');
+  assert.equal(describeAgentError(undefined), '');
+  assert.equal(describeAgentError(null), '');
+});
+
+test('未分类异常与含凭据的响应体不会透传到界面', () => {
+  // 拼接构造，避免测试夹具被误判为真实凭据。
+  const fakeKey = 'sk' + '-abcdefghijklmnopqrstuvwxyz';
+  const leaks = [
+    'fetch failed: Authorization: Bearer ' + fakeKey,
+    '{"error":{"message":"invalid ' + fakeKey + '"}}',
+    'getaddrinfo ENOTFOUND vendor.example at TCPConnectWrap.afterConnect',
+    '<html>502 Bad Gateway</html>'
+  ];
+  for (const raw of leaks) {
+    const text = describeAgentError(raw, '学习计划读取失败，请刷新重试。');
+    assert.equal(text, '学习计划读取失败，请刷新重试。', raw);
+    assert.doesNotMatch(text, /sk-|Bearer|Authorization|getaddrinfo|html/i, raw);
+  }
+  // 已知错误码的补充说明若含凭据字样，也只返回固定文案。
+  const withDetail = describeAgentError('MODEL_HTTP: 请求失败，token=' + fakeKey);
+  assert.doesNotMatch(withDetail, /sk-|token|=/);
+  assert.match(withDetail, /模型服务暂时不可用/);
+});
+
+test('应用自身生成的中文补充说明会被保留', () => {
+  const text = describeAgentError('MODEL_HTTP: 模型账户余额不足，请在服务商控制台充值后重试（HTTP 402）。');
+  assert.match(text, /余额不足/);
+  assert.match(text, /HTTP 402/);
+  assert.doesNotMatch(text, /^MODEL_/);
+  const long = describeAgentError('CALENDAR_INPUT: ' + '很'.repeat(200));
+  assert.doesNotMatch(long, /很{120,}/);
+});
+
+test('错误码提取与「检查模型设置」提示只针对模型类失败', () => {
+  assert.equal(errorCodeOf('MODEL_TIMEOUT: 模型请求超时，请检查网络后重试。'), 'MODEL_TIMEOUT');
+  assert.equal(errorCodeOf('STORAGE_CORRUPT: 会话文件损坏'), 'STORAGE_CORRUPT');
+  assert.equal(errorCodeOf('设备抛出的未分类异常'), '');
+  assert.equal(errorCodeOf(''), '');
+  for (const code of ['MODEL_CONFIG', 'MODEL_AUTH', 'MODEL_TIMEOUT', 'MODEL_TRANSPORT',
+    'MODEL_RATE_LIMIT', 'MODEL_HTTP', 'MODEL_RESPONSE']) {
+    assert.equal(needsModelSettings(code), true, code);
+  }
+  for (const code of ['STORAGE_CORRUPT', 'SPEECH_NO_RESULT', 'CALENDAR_PERMISSION', '']) {
+    assert.equal(needsModelSettings(code), false, code);
+  }
+});
+
+test('源码中登记的每个错误码都有对应的界面文案', async () => {
+  async function collect(directory) {
+    const files = [];
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      const full = path.join(directory, entry.name);
+      if (entry.isDirectory()) files.push(...await collect(full));
+      else if (/\.(ts|ets)$/.test(entry.name)) files.push(full);
+    }
+    return files;
+  }
+  const root = path.join(workspace, 'app', 'entry', 'src', 'main', 'ets');
+  const codes = new Set();
+  for (const file of await collect(root)) {
+    const source = await readFile(file, 'utf8');
+    for (const match of source.matchAll(/['"]([A-Z][A-Z_]{2,}):\s/g)) codes.add(match[1]);
+  }
+  assert.ok(codes.size > 20, `实际提取到 ${codes.size} 个错误码`);
+  const fallbackText = describeAgentError('未分类异常');
+  for (const code of codes) {
+    assert.equal(errorCodeOf(code + ': probe'), code, `界面缺少 ${code} 的文案`);
+    assert.notEqual(describeAgentError(code + ': probe'), fallbackText, `界面把 ${code} 落到了通用兜底`);
+  }
+});
+
+test('断网时用户输入已落盘，界面得到可读提示且下一轮可恢复', async () => {
+  const store = new MemoryKeyValueStore();
+  const sessions = new JsonSessionRepository(store);
+  const registry = new ToolRegistry();
+  const offline = new CompatibleModelClient(
+    { post: async () => { throw new Error('getaddrinfo ENOTFOUND model.example'); } }, settings);
+  const agent = new AgentEngine(offline, registry, sessions);
+  const session = await agent.createConversation();
+  const failed = await agent.send(session.id, '请帮我制定复习计划');
+  assert.equal(failed.state, 'failed');
+  assert.match(failed.error, /MODEL_TRANSPORT/);
+  const uiText = describeAgentError(failed.error);
+  assert.match(uiText, /无法连接模型服务/);
+  assert.doesNotMatch(uiText, /MODEL_|ENOTFOUND|getaddrinfo/);
+  assert.equal(needsModelSettings(errorCodeOf(failed.error)), true);
+  const saved = await sessions.get(session.id);
+  assert.equal(saved.messages.length, 1);
+  assert.equal(saved.messages[0].content, '请帮我制定复习计划');
+  const recovered = new AgentEngine(new MockModelClient(), registry, sessions);
+  const next = await recovered.send(session.id, '继续');
+  assert.equal(next.state, 'completed');
+  assert.equal((await sessions.get(session.id)).messages.length, 3);
+});
+
+test('设备数据损坏时界面提示备份而非覆盖，原文件保持不变', async () => {
+  const raw = '{"version":1,"conversations":[{"id":"x"';
+  const store = new MemoryKeyValueStore();
+  await store.set('sessions_v1', raw);
+  const sessions = new JsonSessionRepository(store);
+  let rawError = '';
+  try { await sessions.list(); } catch (error) { rawError = error.message; }
+  assert.match(rawError, /STORAGE_CORRUPT/);
+  const uiText = describeAgentError(rawError);
+  assert.match(uiText, /备份|保留原始/);
+  assert.doesNotMatch(uiText, /STORAGE_CORRUPT/);
+  assert.equal(needsModelSettings(errorCodeOf(rawError)), false);
+  assert.equal(await store.get('sessions_v1'), raw);
 });

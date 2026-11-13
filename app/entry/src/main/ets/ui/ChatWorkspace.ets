@@ -11,6 +11,7 @@ import { WelcomePanel } from './WelcomePanel';
 import { ChatComposer } from './ChatComposer';
 import { StudyPlansPanel } from './StudyPlansPanel';
 import { ModelSettingsPanel } from './ModelSettingsPanel';
+import { describeAgentError, errorCodeOf, needsModelSettings } from '../services/model/ErrorText';
 import { WorkspaceTheme as T } from './WorkspaceTheme';
 import { WorkspaceNavigation } from './WorkspaceNavigation';
 import { CalendarDraft, CalendarEventInput, CalendarService } from '../contracts/Calendar';
@@ -29,6 +30,8 @@ export struct ChatWorkspace {
   @State private busy: boolean = true;
   @State private status: AgentState = 'idle';
   @State private error: string = '';
+  // 只保存错误码用于诊断与按钮判断，不参与界面文案显示。
+  @State private errorCode: string = '';
   @State private modeLabel: string = '正在初始化';
   @State private speechReady: boolean = false;
   @State private speechState: string = '';
@@ -91,7 +94,9 @@ export struct ChatWorkspace {
       this.showConversation(current);
       this.conversations = await this.runtime.sessions.list();
     } catch (error) {
-      this.error = (error as Error).message || '初始化失败，请重新打开应用。';
+      const raw: string = (error as Error).message || '';
+      this.error = describeAgentError(raw, '初始化失败，请重新打开应用。');
+      this.errorCode = errorCodeOf(raw);
       this.runtime = null;
     } finally { this.busy = false; }
   }
@@ -113,7 +118,7 @@ export struct ChatWorkspace {
       this.view = 'chat';
       this.scrollToLatest();
     } catch (error) {
-      this.modelError = (error as Error).message || '模型配置无效，请检查后重试。';
+      this.modelError = describeAgentError((error as Error).message, '模型配置无效，请检查后重试。');
     }
   }
 
@@ -122,7 +127,7 @@ export struct ChatWorkspace {
     try {
       this.plans = await this.runtime.study.listPlans();
       this.planError = '';
-    } catch (error) { this.planError = (error as Error).message || '学习计划读取失败。'; }
+    } catch (error) { this.planError = describeAgentError((error as Error).message, '学习计划读取失败，请刷新重试。'); }
   }
 
   private async toggleTask(planId: string, task: PlanTask): Promise<void> {
@@ -131,14 +136,14 @@ export struct ChatWorkspace {
     try {
       await this.runtime.study.setTaskCompletion(planId, task.id, task.status !== 'done');
       await this.refreshPlans();
-    } catch (error) { this.planError = (error as Error).message || '任务更新失败，请重试。'; }
+    } catch (error) { this.planError = describeAgentError((error as Error).message, '任务更新失败，请重试。'); }
     finally { this.busy = false; }
   }
 
   private async refreshCalendar(): Promise<void> {
     if (this.runtime === null) { return; }
     try { this.calendarDrafts = await this.runtime.calendar.list(); }
-    catch (error) { this.calendarError = (error as Error).message || '日程记录读取失败。'; }
+    catch (error) { this.calendarError = describeAgentError((error as Error).message, '日程记录读取失败，请刷新重试。'); }
   }
 
   private async schedulePlan(plan: PlanVersion): Promise<void> {
@@ -153,7 +158,7 @@ export struct ChatWorkspace {
         await this.runtime.calendar.prepare(this.currentId, plan.id, planCalendarInputs(plan, Date.now()));
         this.calendarNotice = '已按明天起每日 19:00–20:00 准备草案，提前 10 分钟提醒。请逐项检查或修改后确认。';
       }
-    } catch (error) { this.calendarError = (error as Error).message || '日程草案准备失败。'; }
+    } catch (error) { this.calendarError = describeAgentError((error as Error).message, '日程草案准备失败，请重试。'); }
     finally { await this.refreshCalendar(); this.busy = false; }
   }
 
@@ -177,7 +182,7 @@ export struct ChatWorkspace {
       this.calendarNotice = result.status === 'completed' ? '日程已添加，请在系统日历的「学习计划」账户中查看。' :
         '部分日程未确认成功，请查看逐项结果后查询重试。';
       await this.recordCalendarResult(result);
-    } catch (error) { this.calendarError = (error as Error).message || '日历操作未完成，记录已保留，请刷新后查看。'; }
+    } catch (error) { this.calendarError = describeAgentError((error as Error).message, '日历操作未完成，记录已保留，请刷新后查看。'); }
     finally { await this.refreshCalendar(); this.busy = false; }
   }
 
@@ -188,7 +193,7 @@ export struct ChatWorkspace {
       const result: CalendarDraft = await this.runtime.calendar.cancel(draft.id, draft.revision);
       await this.recordCalendarResult(result);
       this.calendarNotice = '草案后续执行已取消，已创建的系统日程继续保留。';
-    } catch (error) { this.calendarError = (error as Error).message || '取消未完成。'; }
+    } catch (error) { this.calendarError = describeAgentError((error as Error).message, '取消未完成，请刷新后查看。'); }
     finally { await this.refreshCalendar(); this.busy = false; }
   }
 
@@ -198,7 +203,7 @@ export struct ChatWorkspace {
     try {
       await this.runtime.calendar.edit(draft.id, draft.revision, eventId, input);
       return true;
-    } catch (error) { this.calendarError = (error as Error).message || '修改未保存。'; return false; }
+    } catch (error) { this.calendarError = describeAgentError((error as Error).message, '修改未保存，请重试。'); return false; }
     finally { await this.refreshCalendar(); this.busy = false; }
   }
 
@@ -212,6 +217,7 @@ export struct ChatWorkspace {
     this.messages = conversation.messages.slice();
     this.status = 'idle';
     this.error = '';
+    this.errorCode = '';
     this.view = 'chat';
     this.drawerOpen = false;
     this.scrollToLatest();
@@ -224,7 +230,7 @@ export struct ChatWorkspace {
       this.showConversation(await this.runtime.agent.createConversation());
       this.input = '';
       this.conversations = await this.runtime.sessions.list();
-    } catch (error) { this.error = (error as Error).message; }
+    } catch (error) { this.error = describeAgentError((error as Error).message, '会话操作未完成，请重试。'); }
     finally { this.busy = false; }
   }
 
@@ -234,7 +240,7 @@ export struct ChatWorkspace {
     try {
       const conversation: Conversation | null = await this.runtime.sessions.get(id);
       if (conversation !== null) { this.showConversation(conversation); this.input = ''; }
-    } catch (error) { this.error = (error as Error).message; }
+    } catch (error) { this.error = describeAgentError((error as Error).message, '会话操作未完成，请重试。'); }
     finally { this.busy = false; }
   }
 
@@ -248,7 +254,7 @@ export struct ChatWorkspace {
         await this.runtime.agent.createConversation());
       this.input = '';
       this.conversations = await this.runtime.sessions.list();
-    } catch (error) { this.error = (error as Error).message; }
+    } catch (error) { this.error = describeAgentError((error as Error).message, '会话操作未完成，请重试。'); }
     finally { this.busy = false; }
   }
 
@@ -258,6 +264,7 @@ export struct ChatWorkspace {
     const speechRequest: number = this.speechRequest;
     this.busy = true;
     this.error = '';
+    this.errorCode = '';
     this.status = 'thinking';
     this.messages = this.messages.concat([makeMessage('user', text.trim())]);
     this.scrollToLatest();
@@ -266,7 +273,8 @@ export struct ChatWorkspace {
         (state: AgentState) => { this.status = state; });
       this.messages = result.conversation.messages.slice();
       this.input = '';
-      this.error = result.error;
+      this.error = describeAgentError(result.error);
+      this.errorCode = errorCodeOf(result.error);
       this.conversations = await this.runtime.sessions.list();
       await this.refreshPlans();
       await this.refreshCalendar();
@@ -275,13 +283,16 @@ export struct ChatWorkspace {
         try { await this.runtime.speech.speak(result.reply); }
         catch (error) {
           if (speechRequest === this.speechRequest) {
-            this.error = '回复已生成。' + (error as Error).message;
+            this.error = '回复已生成。' + describeAgentError((error as Error).message, '播报未完成，请阅读文字。');
           }
         } finally { if (speechRequest === this.speechRequest) { this.speechState = ''; } }
       }
       this.scrollToLatest();
     } catch (error) {
-      this.error = (error as Error).message || '发送失败，请重试。';
+      const raw: string = (error as Error).message || '';
+      this.error = describeAgentError(raw, '发送失败，请重试；刚才的输入仍保留。') ||
+        '发送失败，请重试；刚才的输入仍保留。';
+      this.errorCode = errorCodeOf(raw);
       this.status = 'failed';
       // 若首次落盘失败则保留输入，恢复已保存的历史，避免只显示临时气泡。
       try {
@@ -302,7 +313,9 @@ export struct ChatWorkspace {
       if (!this.visible || request !== this.speechRequest) { return; }
       this.input = text;
     } catch (error) {
-      if (this.visible && request === this.speechRequest) { this.error = (error as Error).message; }
+      if (this.visible && request === this.speechRequest) {
+        this.error = describeAgentError((error as Error).message, '语音识别未完成，可以继续使用文字输入。');
+      }
     } finally {
       if (request === this.speechRequest) { this.busy = false; this.speechState = ''; }
     }
@@ -342,6 +355,7 @@ export struct ChatWorkspace {
     this.modelError = '';
     this.view = destination;
     this.drawerOpen = false;
+    if (destination === 'settings') { this.error = ''; this.errorCode = ''; }
     if (destination === 'plans') { this.refreshPlans(); }
     if (destination === 'calendar') { this.calendarError = ''; this.calendarNotice = ''; this.refreshCalendar(); }
     if (destination === 'chat') { this.scrollToLatest(); }
@@ -478,8 +492,13 @@ export struct ChatWorkspace {
           if (this.runtime === null && !this.busy) {
             Button('重新加载', { type: ButtonType.Normal }).height(34).fontSize(12).fontColor(T.danger)
               .backgroundColor(T.dangerSoft).borderRadius(8).onClick(() => {
-                this.busy = true; this.error = ''; this.initialize();
+                this.busy = true; this.error = ''; this.errorCode = ''; this.initialize();
               })
+          }
+          // 模型配置/网络类失败给一条可操作的路径；输入框与历史仍保持可用。
+          if (needsModelSettings(this.errorCode) && this.runtime !== null && !this.busy) {
+            Button('检查模型设置', { type: ButtonType.Normal }).height(34).fontSize(12).fontColor(T.danger)
+              .backgroundColor(T.dangerSoft).borderRadius(8).onClick(() => { this.navigate('settings'); })
           }
         }.width('100%').alignItems(HorizontalAlign.Start).padding(12).backgroundColor(T.dangerSoft)
           .borderRadius(10).margin({ bottom: 10 })
