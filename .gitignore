@@ -13,6 +13,8 @@ app/.arkui-x/android/app/libs/
 .env.*
 !.env.example
 *.p12
+*.cer
+*.csr
 *.p7b
 *.jks
 *.keystore
