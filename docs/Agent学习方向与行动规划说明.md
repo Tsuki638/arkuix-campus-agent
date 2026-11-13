@@ -2,23 +2,24 @@
 
 ## 产品依据与本次范围
 
-对齐 GitHub `main` 的 `53b78c2`：考研/就业访谈 → 用户选择路径 → 两到四周阶段任务 → 一周排期 → 日历预览确认 → 进度反馈与调整。保留上一轮 `StudyPlanTool` 和短期时间分配能力。
+沿用考研与就业访谈、路径选择、两到四周阶段任务、周排期、日历确认及进度调整。当前分支已接入 GitHub [新版工作台、DeepSeek 与鸿蒙日历草案](https://github.com/Tsuki638/arkuix-campus-agent/pull/3)。
 
 参考 [LangGraph.js](https://github.com/langchain-ai/langgraphjs) 的有状态工具编排思路，使用本项目现有轻量 Agent，不引入外部依赖。
 
-本轮实现 A 的共享业务、可注入业务仓库与日历端口。真实模型由 C 接入，方向选择/计划书/周日程/确认界面由 B 接入，设备日历权限与执行由 D 适配。离线模型和内存日历演示不计入真实云调用或双端日历验收。
+方向选择可在对话中完成。工作台的“学习计划”显示当前对话的阶段任务、完成标准与已排时段，可逐项标记完成或撤销。“日程预览”显示日期、起止时间、提醒、待确认变更与逐项结果。
 
 ## 实现文件与职责
 
 | 文件 | 职责 |
 | --- | --- |
 | `agent/AgentEngine.ts`、`ToolRegistry.ts` | 注入当前会话及已保存状态，模型不能通过参数选择其他会话；保留步数、失败和并发保护 |
-| `agent/learning/LearningCatalog.ts` | 识别访谈缺项、两个入口的候选与理由、短期体验任务、稳定阶段任务 |
+| `agent/learning/LearningCatalog.ts` | 识别访谈缺项、候选理由与体验任务、校验模型任务草案 |
 | `agent/learning/LearningScheduler.ts` | 明确时区的一周排期、时段合并、日历冲突扣除、任务依赖/截止时间、未排与延期诊断 |
 | `agent/learning/LearningPlanner.ts` | 业务版本、路径选择、进度、预览、可信确认/取消、逐项日历结果与恢复 |
 | `agent/learning/LearningTools.ts` | 向模型声明学习工具，校验 JSON 字段并使用 Engine 提供的会话上下文 |
 | `contracts/LearningModels.ts`、`LearningPorts.ts` | B/C/D 共用数据与仓库/日历契约 |
 | `services/storage/JsonLearningRepository.ts` | 版本化 JSON、串行写快照、损坏拒绝覆盖、预览与计划/日程关联语义校验 |
+| `services/calendar/LearningCalendarAdapter.ts` | 复用设备日历服务，确认时申请权限，按稳定标识查证日程及恢复 |
 | `platform/calendar/UnavailableCalendarPort.ts` | 未接设备时明确不可用，不伪造写入成功 |
 
 所有源码相对 `app/entry/src/main/ets/`。测试位于 `tests/learning-*.test.mjs`，旧工具回归保留在 `tests/framework.test.mjs`。
@@ -29,7 +30,7 @@
 
 条件不足返回缺项；齐全后给两条候选、比较理由、体验任务和限制说明。用户选择后才能生成正式计划。计算机就业入口含 `go-backend` / `frontend`；其他专业提供通用能力与方向体验；考研提供通用学习基础或目标核实路径，不宣称具体院校招生科目或年份要求。尚不确定目标时，用户可明确填写“尚未确定”，先比较体验任务。
 
-当前任务为可调整的模板提案，每周含学习与实践两项，周耗时按用户预算分配，每项包含稳定 ID、阶段、周次、预计/剩余分钟数、前置依赖、完成标准与状态。**耗时是提案估计，不保证掌握程度或岗位适配。**首条完整演示为 Go 后端方向；模板内容深度可由团队后续完善。
+真实模型首次生成计划时可提交 `tasks`，每项包含简短 ID、标题、阶段、周次、预计分钟、完成标准、先列出的前置任务及可选截止时间。工具校验周预算、任务覆盖和依赖后才保存。省略草案可用内置模板演示。定制计划生成后沿用现有任务，进度调整通过专用工具执行。
 
 ## 排期与反馈
 
@@ -38,6 +39,8 @@
 任务依赖按拓扑顺序处理，前置未完整排完时不提前安排后继；已完成任务不重排；窗口外阶段列为延期，容量/截止时间不足的当前任务列为未排，不能塞进超额时间。当前为顺序贪心排期，不承诺全局最优。任务、计划页与日历预览使用同一份任务数据。
 
 用户反馈 `done` 或 `pending`，可补充剩余分钟数。反馈后旧预览失效，保留已完成任务并显式重排待办。`updateTaskConstraints` 可调整未完成任务的截止时间或依赖；循环/未知依赖不保存。再次生成同一路径计划也保留已反馈的进度和任务 ID。
+
+下调每周可用时间后，旧的待办排期失效。重新排期按最新预算截断可用时间，排不完的任务保留待办并返回 `partial`。
 
 ## 模型工具与可信界面动作
 
@@ -83,7 +86,7 @@ await runtime.learning.cancelCalendar(conversationId, preview.id);
 
 ## C/D 注入与持久化
 
-`AppRuntime` 的前四个构造参数不变，第五/六个可注入 `LearningRepository` / `CalendarPort`；未提供日历时使用明确不可用实现。`createDeviceRuntime(context, settings, speech, calendar)` 已预留 D 的入口。
+`AppRuntime` 的第五、六个构造参数用于注入 `LearningRepository` 和 `CalendarPort`。`createDeviceRuntime(context, settings, speech, calendar)` 接收平台 `CalendarService`，供原有日历草案和阶段排期共用。鸿蒙通过应用自己的“学习计划”账户执行；当前排期依据用户填写的空闲时段。
 
 设备业务文件为 `context.filesDir/campus_agent_learning_v1.json`，与聊天文件分开，防止聊天快照覆盖刚保存的日历结果。当前记录 profile、候选与选择、当前计划版本、任务进度、预览/取消意图、逐项执行状态和关联 ID。C 可以替换业务仓库，但需保留快照、串行写、损坏拒绝覆盖及错误传播语义；此处“重启恢复”指仓库重建的 Node 检查，设备文件 API 仍需实测。
 
@@ -113,6 +116,6 @@ npm.cmd run demo:study
 {"tool":"explore_learning_directions","input":{"background":"学过Go基础","interests":"后端","goal":"体验实习方向","weeks":2,"minutesPerWeek":120}}
 ```
 
-真实模型接入后，用自然语言完成同一链路，并在 B 的界面确认后由 D 的双端适配执行。录制材料需展示真实调用、实际系统日历和权限失败；Node 模拟日志不作为这部分验收。
+应用的“模型设置”可选 DeepSeek，使用自己的 API Key，进入考研准备或就业探索，再明确选择路径、填写未来七天可用时段并生成日程预览。设备验收需核对系统日历里的新增、移动、删除和提醒，以及拒绝权限时的界面反馈。
 
-本轮最终验证：19 个共享模块转换与导入通过，106 项行为检查全部通过；新版11步离线演示与旧短期演示均通过。日志位于被 Git 忽略的 `.generated/learning-direction-check.log`、`.generated/learning-direction-demo.log`、`.generated/learning-study-demo.log`，可按上述命令重建。
+API 24 鸿蒙工程可构建未签名 HAP。当前设备环境没有可用的 DeepSeek 凭据，真实模型的阶段任务生成、设备端日历读写与提醒，以及 Android 日历仍待验收。

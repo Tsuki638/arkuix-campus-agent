@@ -22,6 +22,7 @@ export interface CalendarReceipt {
 // D 的适配必须核验应用归属和 operationKey 去重；reconcile.failed 表示已确定未执行。
 export interface CalendarPort {
   readBusy(startAt: string, endAt: string): Promise<CalendarReadResult>;
+  prepareWrite?(): Promise<void>;
   reconcile(operation: CalendarOperation): Promise<CalendarReceipt>;
   apply(operation: CalendarOperation): Promise<CalendarReceipt>;
 }

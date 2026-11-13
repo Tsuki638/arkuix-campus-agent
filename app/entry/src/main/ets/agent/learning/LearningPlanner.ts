@@ -1,8 +1,8 @@
 import type { CalendarPort, CalendarReadResult, CalendarReceipt, LearningRepository } from '../../contracts/LearningPorts';
-import type { CalendarItemResult, CalendarLink, CalendarOperation, CalendarPreview, LearnerProfile, LearningPlan, LearningState,
+import type { CalendarItemResult, CalendarLink, CalendarOperation, CalendarPreview, LearnerProfile, LearningPlan, LearningState, LearningTask, LearningTaskDraft,
   ScheduledBlock, TimeWindow } from '../../contracts/LearningModels';
 import { newId } from '../../contracts/Models';
-import { buildLearningTasks, missingProfileFields, recommendPaths } from './LearningCatalog';
+import { buildLearningTasks, missingProfileFields, recommendPaths, validateTaskDraft } from './LearningCatalog';
 import { scheduleLearningTasks, validateTimestamp } from './LearningScheduler';
 
 const WEEK: number = 7 * 24 * 60 * 60 * 1000;
@@ -44,11 +44,18 @@ export class LearningPlanner {
           (profile.minutesPerWeek < 30 || profile.minutesPerWeek > 10080))) {
         throw new Error('INVALID_PROFILE: 请选择考研或就业；计划 2–4 周，每周可用时间为 30–10080 整数分钟。');
       }
+      const budgetChanged = state.profile.minutesPerWeek !== profile.minutesPerWeek;
       state.profile = profile;
       state.candidates = recommendPaths(profile);
       if (!state.candidates.some((path) => path.id === state.selectedPathId)) {
         state.selectedPathId = '';
         state.plan = null;
+      } else if (state.plan !== null && budgetChanged) {
+        const plan = state.plan;
+        plan.schedule = plan.schedule.filter((block) => plan.tasks.some((task) => task.id === block.taskId && task.status === 'done'));
+        plan.unscheduledTaskIds = [];
+        plan.needsScheduling = true;
+        plan.version += 1;
       }
       this.touch(state);
       await this.repository.save(state);
@@ -67,14 +74,28 @@ export class LearningPlanner {
     });
   }
 
-  async createPlan(id: string, startAt: string): Promise<LearningState> {
+  async createPlan(id: string, startAt: string, drafts?: LearningTaskDraft[]): Promise<LearningState> {
     return this.change(id, async (state) => {
       if (state.selectedPathId === '') { throw new Error('PATH_NOT_SELECTED: 请先由用户选择学习路径。'); }
       validateTimestamp(startAt);
-      const tasks = buildLearningTasks(state.profile, state.selectedPathId);
-      // 稳定任务身份保留实际进度与原估时，不因模板重建覆盖用户反馈。
       const previous = state.plan;
-      if (previous !== null && previous.pathId === state.selectedPathId) {
+      if (drafts !== undefined && previous !== null) {
+        throw new Error('PLAN_ALREADY_EXISTS: 已有阶段计划，请读取任务并按用户反馈调整约束或重新排期。');
+      }
+      const personalized = drafts !== undefined || previous?.personalized === true;
+      if (drafts === undefined && previous?.personalized && previous.weeks !== state.profile.weeks) {
+        throw new Error('PLAN_WEEKS_CHANGED: 已保存的定制计划周数与新条件不同，请沿用原周数调整日程，或在新会话制定新计划。');
+      }
+      let tasks: LearningTask[];
+      if (drafts !== undefined) {
+        tasks = validateTaskDraft(state.profile, state.selectedPathId, startAt, drafts);
+      } else if (previous !== null && previous.personalized) {
+        tasks = previous.tasks;
+      } else {
+        tasks = buildLearningTasks(state.profile, state.selectedPathId);
+      }
+      // 模板重建时保留用户实际进度与已保存约束。
+      if (!personalized && previous !== null && previous.pathId === state.selectedPathId) {
         for (const task of tasks) {
           const old = previous.tasks.find((item) => item.id === task.id);
           if (old !== undefined) {
@@ -91,6 +112,7 @@ export class LearningPlanner {
       }
       state.plan = { id: previous?.id || newId('plan'), version: (previous?.version || 0) + 1,
         pathId: state.selectedPathId, weeks: state.profile.weeks, startAt: startAt, tasks: tasks,
+        personalized: personalized, needsScheduling: true,
         schedule: previous === null ? [] : previous.schedule.filter((block) =>
           tasks.some((task) => task.id === block.taskId && task.status === 'done')), unscheduledTaskIds: [] };
       this.touch(state);
@@ -115,15 +137,19 @@ export class LearningPlanner {
         (window.eventId !== undefined || window.appEventKey !== undefined) &&
         (window.eventId === undefined || window.eventId === link.eventId) &&
         (window.appEventKey === undefined || window.appEventKey === link.appEventKey))) : [];
-      const result = scheduleLearningTasks(plan, available, conflicts, new Date(start).toISOString());
+      const result = scheduleLearningTasks(plan, available, conflicts, new Date(start).toISOString(), state.profile.minutesPerWeek);
       const done = plan.schedule.filter((block) => plan.tasks.some((task) => task.id === block.taskId && task.status === 'done'));
       result.blocks.forEach((block) => { block.reminderMinutes = reminderMinutes; });
       plan.schedule = done.concat(result.blocks);
       plan.unscheduledTaskIds = result.unscheduledTaskIds;
+      plan.needsScheduling = false;
       plan.version += 1;
       this.touch(state);
       await this.repository.save(state);
-      return { state: state, result: result, calendarRead: read };
+      const count = result.unscheduledTaskIds.length;
+      return { state: state, result: result, calendarRead: read,
+        status: count > 0 ? 'partial' : 'scheduled',
+        message: count > 0 ? '本周有 ' + count + ' 项任务未排完，可增加空闲时段或调整任务后重排。' : '已保存本周排期。' };
     });
   }
 
@@ -144,6 +170,7 @@ export class LearningPlanner {
       // 其余待办需要显式重新排期；已完成任务保留原日程与 ID。
       plan.schedule = plan.schedule.filter((block) => plan.tasks.some((item) => item.id === block.taskId && item.status === 'done'));
       plan.unscheduledTaskIds = [];
+      plan.needsScheduling = true;
       this.touch(state);
       await this.repository.save(state);
       return state;
@@ -175,6 +202,7 @@ export class LearningPlanner {
       plan.version += 1;
       plan.schedule = plan.schedule.filter((block) => plan.tasks.some((item) => item.id === block.taskId && item.status === 'done'));
       plan.unscheduledTaskIds = [];
+      plan.needsScheduling = true;
       this.touch(state);
       await this.repository.save(state);
       return state;
@@ -184,9 +212,9 @@ export class LearningPlanner {
   async previewCalendar(id: string): Promise<CalendarPreview> {
     return this.change(id, async (state) => {
       const plan = this.requirePlan(state);
-      if (plan.schedule.length === 0 && !state.calendarLinks.some((link) => !link.taskCompleted &&
+      if (plan.needsScheduling || (plan.schedule.length === 0 && !state.calendarLinks.some((link) => !link.taskCompleted &&
         Date.parse(link.startAt) >= this.now() &&
-        !plan.tasks.some((task) => task.id === link.taskId && task.status === 'done'))) {
+        !plan.tasks.some((task) => task.id === link.taskId && task.status === 'done')))) {
         throw new Error('SCHEDULE_REQUIRED: 请先提供可用时段并生成近期日程。');
       }
       const operations: CalendarOperation[] = [];
@@ -230,6 +258,7 @@ export class LearningPlanner {
         preview.results[index].status !== 'succeeded' && this.isPastOperation(state, op))) {
         throw new Error('STALE_PREVIEW: 预览中的日程已过时，请重新排期并预览确认。');
       }
+      if (preview.results.some((item) => item.status !== 'succeeded')) { await this.calendar.prepareWrite?.(); }
       for (let index = 0; index < preview.operations.length; index++) {
         const op = preview.operations[index];
         const item = preview.results[index];
@@ -268,6 +297,7 @@ export class LearningPlanner {
       if (preview.results.some((item) => item.status === 'unknown')) {
         preview.cancelRequested = true;
         await this.repository.save(state);
+        await this.calendar.prepareWrite?.();
         for (let index = 0; index < preview.operations.length; index++) {
           const item = preview.results[index];
           if (item.status !== 'unknown') { continue; }

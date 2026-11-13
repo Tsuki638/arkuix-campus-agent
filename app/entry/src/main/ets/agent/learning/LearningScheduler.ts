@@ -82,7 +82,7 @@ function taskOrder(tasks: LearningTask[]): LearningTask[] {
 }
 
 export function scheduleLearningTasks(
-  plan: LearningPlan, available: TimeWindow[], busy: TimeWindow[], from: string
+  plan: LearningPlan, available: TimeWindow[], busy: TimeWindow[], from: string, minutesPerWeek: number = 10080
 ): ScheduleResult {
   const fromInstant = validateTimestamp(from);
   const horizon = fromInstant + WEEK;
@@ -117,6 +117,7 @@ export function scheduleLearningTasks(
   const result: ScheduleResult = { blocks: [], unscheduledTaskIds: [], deferredTaskIds: [] };
   const completed = new Map<string, number>();
   const deferred = new Set<string>();
+  let remainingBudget = minutesPerWeek;
   for (const task of ordered) {
     if (task.status === 'done') {
       completed.set(task.id, start);
@@ -141,7 +142,7 @@ export function scheduleLearningTasks(
     const nextFree: Interval[] = [];
     for (const slot of free) {
       const blockStart = Math.max(slot.start, earliest);
-      const minutes = Math.min(remaining, Math.floor((Math.min(slot.end, latest) - blockStart) / MINUTE));
+      const minutes = Math.min(remaining, remainingBudget, Math.floor((Math.min(slot.end, latest) - blockStart) / MINUTE));
       if (minutes <= 0) {
         nextFree.push(slot);
         continue;
@@ -153,6 +154,7 @@ export function scheduleLearningTasks(
       });
       part++;
       remaining -= minutes;
+      remainingBudget -= minutes;
       completedAt = blockEnd;
       if (slot.start < blockStart) nextFree.push({ start: slot.start, end: blockStart });
       if (blockEnd < slot.end) nextFree.push({ start: blockEnd, end: slot.end });

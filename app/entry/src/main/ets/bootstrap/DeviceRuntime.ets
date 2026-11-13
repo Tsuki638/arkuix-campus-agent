@@ -7,12 +7,13 @@ import { FileKeyValueStore } from '../services/storage/FileKeyValueStore';
 import { OhosJsonTransport } from '../platform/network/OhosJsonTransport';
 import { UnavailableSpeechService } from '../platform/speech/UnavailableSpeechService';
 import { AppRuntime, createRuntime } from './Runtime';
-import { CalendarPort } from '../contracts/LearningPorts';
+import { CalendarService } from '../contracts/Calendar';
+import { UnavailableCalendarService } from '../platform/calendar/UnavailableCalendarService';
 
 // 会话、基础计划和方向规划共用设备文件端口，分别保存。
 // 不在共享 UI/Agent 中判断操作系统，也不复制两套业务。
 export function createDeviceRuntime(context: common.Context, settings?: ModelSettings,
-  speech?: SpeechService, calendar?: CalendarPort): AppRuntime {
+  speech?: SpeechService, calendar: CalendarService = new UnavailableCalendarService()): AppRuntime {
   let model: ModelClient = new MockModelClient();
   if (settings !== undefined) {
     model = new CompatibleModelClient(new OhosJsonTransport(), settings);

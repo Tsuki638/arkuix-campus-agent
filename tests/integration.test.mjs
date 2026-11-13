@@ -9,6 +9,95 @@ const { MockModelClient } = await core.load('services/model/MockModelClient.ts')
 const { MemoryKeyValueStore } = await core.load('services/storage/MemoryKeyValueStore.ts');
 const { StudyDataRepository } = await core.load('services/storage/StudyDataRepository.ts');
 const { UnavailableSpeechService } = await core.load('platform/speech/UnavailableSpeechService.ts');
+const { DeepSeekConfig } = await core.load('services/model/DeepSeekConfig.ts');
+
+test('DeepSeek 非思考模式完成工具往返及第二轮对话，通用接口不携带供应商参数', async () => {
+  const store = new MemoryKeyValueStore();
+  const requests = [];
+  const transport = { post: async (request) => {
+    const payload = JSON.parse(request.body);
+    requests.push(payload);
+    assert.equal(payload.thinking.type, 'disabled');
+    assert.equal(payload.max_tokens, 2048);
+    if (requests.length === 1) {
+      return JSON.stringify({ choices: [{ message: { role: 'assistant', content: null,
+        tool_calls: [{ id: 'deepseek-plan', type: 'function', function: {
+          name: 'create_study_plan', arguments: '{"goal":"复习高数","days":3}'
+        } }] } }] });
+    }
+    const toolResult = payload.messages.find((message) => message.role === 'tool');
+    assert.equal(toolResult.tool_call_id, 'deepseek-plan');
+    assert.equal(JSON.parse(toolResult.content).success, true);
+    assert.equal(payload.messages.filter((message) => message.tool_calls?.length).length, 1);
+    if (requests.length === 3) {
+      assert.equal(payload.messages.filter((message) => message.role === 'user').length, 2);
+      assert.equal(payload.messages.at(-1).content, '刚才是什么计划？');
+    }
+    return JSON.stringify({ choices: [{ message: { role: 'assistant', content: '高数复习计划，共 3 天。' } }] });
+  } };
+  const client = new CompatibleModelClient(transport, {
+    endpoint: DeepSeekConfig.endpoint, model: DeepSeekConfig.model, apiKey: 'test-secret-only'
+  });
+  const runtime = createRuntime(client, store, new UnavailableSpeechService(), 'DeepSeek 测试');
+  const session = await runtime.agent.createConversation();
+  assert.equal((await runtime.agent.send(session.id, '创建 3 天高数计划')).state, 'completed');
+  assert.equal((await runtime.agent.send(session.id, '刚才是什么计划？')).state, 'completed');
+  assert.equal(requests.length, 3);
+  assert.equal((await runtime.study.listPlans())[0].tasks.length, 3);
+  assert.equal((await store.get('sessions_v1')).includes('test-secret-only'), false);
+
+  for (const endpoint of ['https://example.invalid/chat/completions',
+    'https://api.deepseek.com.example.invalid/chat/completions']) {
+    const generic = new CompatibleModelClient({ post: async (request) => {
+      const payload = JSON.parse(request.body);
+      assert.equal(payload.thinking, undefined);
+      assert.equal(payload.max_tokens, undefined);
+      return JSON.stringify({ choices: [{ message: { role: 'assistant', content: '通用接口正常' } }] });
+    } }, { endpoint, model: 'generic', apiKey: 'test-only' });
+    await generic.complete([], []);
+  }
+});
+
+test('DeepSeek 协议发送定制任务 schema，将保存结果及调用 ID 回传模型', async () => {
+  const store = new MemoryKeyValueStore();
+  let requests = 0;
+  const tasks = [
+    { id: 'route', title: '用 Go 编写健康检查接口', phase: '接口', week: 1, estimatedMinutes: 45,
+      completionCriteria: '用 curl 验证状态码和响应体', dependsOn: [] },
+    { id: 'tests', title: '添加 HTTP 处理函数测试', phase: '测试', week: 2, estimatedMinutes: 50,
+      completionCriteria: '保存 go test 的结果', dependsOn: ['route'] }
+  ];
+  const transport = { post: async (request) => {
+    requests++;
+    const payload = JSON.parse(request.body);
+    const definition = payload.tools.find((tool) => tool.function.name === 'create_learning_plan').function;
+    assert.ok(definition.parameters.properties.tasks.items.required.includes('completionCriteria'));
+    assert.equal(payload.messages.filter((message) => message.role === 'system').length, 1);
+    assert.match(payload.messages[0].content, /go-backend/);
+    if (requests === 1) {
+      return JSON.stringify({ choices: [{ message: { role: 'assistant', content: null,
+        tool_calls: [{ id: 'direction-plan', type: 'function', function: { name: 'create_learning_plan',
+          arguments: JSON.stringify({ startAt: '2026-11-16T00:00:00+08:00', tasks }) } }] } }] });
+    }
+    const tool = payload.messages.at(-1);
+    assert.equal(tool.tool_call_id, 'direction-plan');
+    const result = JSON.parse(tool.content);
+    assert.equal(result.success, true);
+    assert.deepEqual(JSON.parse(result.content).plan.tasks.map((task) => task.title), tasks.map((task) => task.title));
+    return JSON.stringify({ choices: [{ message: { role: 'assistant', content: '两周阶段计划已保存。' } }] });
+  } };
+  const client = new CompatibleModelClient(transport, {
+    endpoint: DeepSeekConfig.endpoint, model: DeepSeekConfig.model, apiKey: 'test-only'
+  });
+  const runtime = createRuntime(client, store, new UnavailableSpeechService(), '测试');
+  const { id } = await runtime.agent.createConversation();
+  await runtime.learning.interview(id, { track: 'employment', major: '计算机', grade: '大三',
+    background: 'Go 基础', interests: '服务端', goal: '准备实习', weeks: 2, minutesPerWeek: 60 });
+  await runtime.learning.selectPath(id, 'go-backend');
+  assert.equal((await runtime.agent.send(id, '按我选的方向生成两周任务')).reply, '两周阶段计划已保存。');
+  assert.equal(requests, 2);
+  assert.equal((await runtime.learning.getState(id)).plan.personalized, true);
+});
 
 test('识别文本经模型适配器调用工具、回传结果，计划与打卡可跨运行时恢复', async () => {
   const store = new MemoryKeyValueStore();

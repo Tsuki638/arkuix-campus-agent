@@ -132,6 +132,8 @@ export class JsonLearningRepository implements LearningRepository {
     if (state.plan !== null) {
       const plan = state.plan;
       if (plan === undefined || typeof plan.id !== 'string' || !Number.isInteger(plan.version) ||
+        (plan.personalized !== undefined && typeof plan.personalized !== 'boolean') ||
+        (plan.needsScheduling !== undefined && typeof plan.needsScheduling !== 'boolean') ||
         typeof plan.pathId !== 'string' || !Number.isInteger(plan.weeks) || typeof plan.startAt !== 'string' ||
         !this.validTime(plan.startAt) ||
         !Array.isArray(plan.tasks) || !Array.isArray(plan.schedule) || !Array.isArray(plan.unscheduledTaskIds) ||

@@ -12,6 +12,11 @@ import { LearningPlanner } from '../agent/learning/LearningPlanner';
 import { createLearningTools } from '../agent/learning/LearningTools';
 import { JsonLearningRepository } from '../services/storage/JsonLearningRepository';
 import { UnavailableCalendarPort } from '../platform/calendar/UnavailableCalendarPort';
+import type { CalendarService } from '../contracts/Calendar';
+import { CalendarCoordinator } from '../services/calendar/CalendarCoordinator';
+import { LearningCalendarAdapter } from '../services/calendar/LearningCalendarAdapter';
+import { UnavailableCalendarService } from '../platform/calendar/UnavailableCalendarService';
+import { PrepareCalendarEventsTool, ListCalendarDraftsTool, ListStudyPlansTool } from '../agent/tools/CalendarTools';
 
 export class AppRuntime {
   agent: AgentService;
@@ -20,12 +25,14 @@ export class AppRuntime {
   study: StudyDataRepository;
   modeLabel: string;
   learning: LearningPlanner;
+  calendar: CalendarCoordinator;
   private active: Set<string> = new Set<string>();
 
   constructor(model: ModelClient, sessions: SessionRepository, speech: SpeechService, modeLabel: string,
     learningRepository: LearningRepository = new JsonLearningRepository(new MemoryKeyValueStore()),
     calendar: CalendarPort = new UnavailableCalendarPort(),
-    study: StudyDataRepository = new StudyDataRepository(new MemoryKeyValueStore())) {
+    study: StudyDataRepository = new StudyDataRepository(new MemoryKeyValueStore()),
+    calendarCoordinator: CalendarCoordinator = new CalendarCoordinator(new MemoryKeyValueStore(), new UnavailableCalendarService())) {
     this.learning = new LearningPlanner(learningRepository, calendar, Date.now,
       async (id) => await sessions.get(id) !== null);
     this.sessions = {
@@ -41,6 +48,7 @@ export class AppRuntime {
     };
     this.speech = speech;
     this.study = study;
+    this.calendar = calendarCoordinator;
     this.modeLabel = modeLabel;
     this.agent = this.createAgent(model);
   }
@@ -54,6 +62,9 @@ export class AppRuntime {
   private createAgent(model: ModelClient): AgentService {
     const registry: ToolRegistry = new ToolRegistry();
     registry.register(new StudyPlanTool(this.study));
+    registry.register(new PrepareCalendarEventsTool(this.calendar, this.study));
+    registry.register(new ListCalendarDraftsTool(this.calendar));
+    registry.register(new ListStudyPlansTool(this.study));
     createLearningTools(this.learning).forEach((tool) => registry.register(tool));
     const engine = new AgentEngine(model, registry, this.sessions, 4, this.learning);
     return {
@@ -73,9 +84,11 @@ export class AppRuntime {
 }
 
 export function createRuntime(model: ModelClient, store: KeyValueStore, speech: SpeechService,
-  modeLabel: string, calendar?: CalendarPort): AppRuntime {
+  modeLabel: string, calendar: CalendarService = new UnavailableCalendarService()): AppRuntime {
+  const study = new StudyDataRepository(store);
   return new AppRuntime(model, new JsonSessionRepository(store), speech, modeLabel,
-    new JsonLearningRepository(store), calendar, new StudyDataRepository(store));
+    new JsonLearningRepository(store), new LearningCalendarAdapter(calendar), study,
+    new CalendarCoordinator(store, calendar, study));
 }
 
 export function createMockRuntime(): AppRuntime {

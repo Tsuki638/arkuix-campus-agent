@@ -198,6 +198,17 @@ test('新时段全部冲突时仍可预览确认删除已不适用的旧未来�
   assert.ok(confirmed.results.every((item) => item.status === 'succeeded'));
 });
 
+test('打卡使旧排期失效，重新排期前不能把其余任务变成删除日程', async () => {
+  const { planner, calendar } = await setup();
+  const initial = await planner.previewCalendar('session-a');
+  await planner.confirmCalendar('session-a', initial.id);
+  const before = await planner.getState('session-a');
+  await planner.recordProgress('session-a', before.plan.tasks[0].id, 'done');
+  await assert.rejects(planner.previewCalendar('session-a'), /SCHEDULE_REQUIRED/);
+  assert.equal((await planner.getState('session-a')).preview, null);
+  assert.equal(calendar.calls.length, initial.operations.length);
+});
+
 test('取消未知操作仅核对结果，不补写，取消意图持久化后不能再次确认写入', async () => {
   const calendar = new TestCalendar();
   calendar.reconcile = async () => ({ status: 'unknown', eventId: '', error: 'TIMEOUT' });

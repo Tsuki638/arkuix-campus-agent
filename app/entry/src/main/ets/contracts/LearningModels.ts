@@ -31,6 +31,17 @@ export interface LearningTask {
   status: 'pending' | 'done';
 }
 
+export interface LearningTaskDraft {
+  id: string;
+  title: string;
+  phase: string;
+  week: number;
+  estimatedMinutes: number;
+  completionCriteria: string;
+  dependsOn: string[];
+  dueAt?: string;
+}
+
 export interface TimeWindow { startAt: string; endAt: string; }
 
 export interface ScheduledBlock extends TimeWindow {
@@ -49,6 +60,8 @@ export interface LearningPlan {
   tasks: LearningTask[];
   schedule: ScheduledBlock[];
   unscheduledTaskIds: string[];
+  personalized?: boolean;
+  needsScheduling?: boolean;
 }
 
 export interface ScheduleResult {

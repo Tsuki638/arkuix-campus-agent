@@ -56,7 +56,14 @@ let state = await ask('2. 补充基础、兴趣、目标与时间', 'explore_lea
   { background: '已有 Go 基础', interests: '后端接口', goal: '体验后端实习方向', weeks: 2, minutesPerWeek: 120 });
 console.log('候选：' + state.candidates.map((path) => path.title).join(' / '));
 await ask('3. 用户选择 Go 后端路径', 'select_learning_path', { pathId: 'go-backend' });
-state = await ask('4. 形成两周任务提案', 'create_learning_plan', { startAt });
+state = await ask('4. 校验并保存两周任务草案', 'create_learning_plan', { startAt, tasks: [
+  { id: 'handler', title: '实现 Go HTTP 查询接口', phase: '接口实践', week: 1, estimatedMinutes: 60,
+    completionCriteria: '保留一次 curl 请求和对应的 JSON 响应', dependsOn: [] },
+  { id: 'invalid-input', title: '验证接口的非法参数', phase: '接口实践', week: 1, estimatedMinutes: 60,
+    completionCriteria: '记录缺少参数时的 400 响应', dependsOn: ['handler'] },
+  { id: 'readme', title: '编写接口运行说明', phase: '成果整理', week: 2, estimatedMinutes: 45,
+    completionCriteria: '按说明在新终端复现查询请求', dependsOn: ['invalid-input'] }
+] });
 console.log('阶段任务：' + state.plan.tasks.map((task) => `第${task.week}周 ${task.title}（${task.estimatedMinutes}分钟）`).join('；'));
 await ask('5. 按空闲时段安排未来一周', 'schedule_learning_tasks', { from: startAt, available, reminderMinutes: 0 });
 state = await ask('6. 生成日历预览，尚未确认', 'preview_learning_calendar', {});

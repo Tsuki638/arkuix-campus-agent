@@ -1,11 +1,12 @@
 import type { AgentTool } from '../../contracts/Ports';
 import type { ToolDefinition, ToolResult } from '../../contracts/Models';
-import type { LearnerProfile, TimeWindow, ToolContext } from '../../contracts/LearningModels';
+import type { LearnerProfile, LearningTaskDraft, TimeWindow, ToolContext } from '../../contracts/LearningModels';
 import { LearningPlanner } from './LearningPlanner';
 
 interface ToolInput extends Partial<LearnerProfile> {
   pathId?: string;
   startAt?: string;
+  tasks?: LearningTaskDraft[];
   from?: string;
   available?: TimeWindow[];
   reminderMinutes?: number;
@@ -43,9 +44,7 @@ class LearningTool implements AgentTool {
         throw new Error('INVALID_TOOL_INPUT: 参数缺失或包含未声明字段；会话及用户确认不能由模型参数指定。');
       }
       const result = await this.handler(context.conversationId, value);
-      const schedule = result as { result?: { unscheduledTaskIds: string[] } };
-      return { name: this.spec.name, success: schedule.result === undefined || schedule.result.unscheduledTaskIds.length === 0,
-        content: JSON.stringify(result) };
+      return { name: this.spec.name, success: true, content: JSON.stringify(result) };
     } catch (error) {
       return { name: this.spec.name, success: false, content: error instanceof Error ? error.message : 'LEARNING_FAILED: 处理失败。' };
     }
@@ -65,9 +64,19 @@ export function createLearningTools(planner: LearningPlanner): AgentTool[] {
       async (id, input) => planner.interview(id, input)),
     new LearningTool('select_learning_path', '仅在用户明确选择候选方向后保存 pathId，不替用户擅自选择。',
       { pathId: text }, ['pathId'], async (id, input) => planner.selectPath(id, input.pathId!)),
-    new LearningTool('create_learning_plan', '根据用户已选路径形成2–4周阶段任务提案，包含耗时、依赖、完成标准；估计不保证学习效果。',
-      { startAt: timestamp }, ['startAt'], async (id, input) => planner.createPlan(id, input.startAt!)),
-    new LearningTool('schedule_learning_tasks', '使用用户给定空闲时段，结合获授权读取的冲突、依赖与截止时间细化未来7天。无写入；容量不足保留可排部分并指出未排任务。',
+    new LearningTool('create_learning_plan', '首次创建用户已选路径的2–4周计划时提供具体任务草案；每周不得超预算，前置任务须先列出。已有计划请读取并调整进度或排期。',
+      { startAt: timestamp, tasks: { type: 'array', minItems: 2, maxItems: 16, items: { type: 'object',
+        properties: { id: { type: 'string', pattern: '^[a-z][a-z0-9_-]{0,39}$' },
+          title: { type: 'string', minLength: 1, maxLength: 120 },
+          phase: { type: 'string', minLength: 1, maxLength: 60 },
+          week: { type: 'integer', minimum: 1, maximum: 4 }, estimatedMinutes: { type: 'integer', minimum: 1, maximum: 10080 },
+          completionCriteria: { type: 'string', minLength: 1, maxLength: 300 },
+          dependsOn: { type: 'array', items: { type: 'string' }, description: '填写在本数组前面已列出的前置任务 id。' },
+          dueAt: timestamp },
+        required: ['id', 'title', 'phase', 'week', 'estimatedMinutes', 'completionCriteria', 'dependsOn'],
+        additionalProperties: false } } }, ['startAt'],
+      async (id, input) => planner.createPlan(id, input.startAt!, input.tasks)),
+    new LearningTool('schedule_learning_tasks', '使用用户给定空闲时段，结合获授权读取的冲突、依赖与截止时间细化未来7天。容量不足时返回 status=partial，说明未排完任务，已有时段仍可预览。',
       { from: timestamp, available: { type: 'array', minItems: 1, maxItems: 100, items: { type: 'object',
         properties: { startAt: timestamp, endAt: timestamp }, required: ['startAt', 'endAt'], additionalProperties: false } },
       reminderMinutes: { type: 'integer', minimum: 0, maximum: 10080 } }, ['from', 'available'],

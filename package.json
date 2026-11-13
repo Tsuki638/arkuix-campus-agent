@@ -7,6 +7,8 @@
   "scripts": {
     "demo": "node --disable-warning=ExperimentalWarning scripts/demo.mjs",
     "verify:model": "node --disable-warning=ExperimentalWarning scripts/verify-model.mjs",
+    "verify:deepseek": "node --disable-warning=ExperimentalWarning --env-file-if-exists=.env.local scripts/verify-model.mjs --deepseek",
+    "verify:calendar": "node --disable-warning=ExperimentalWarning --env-file-if-exists=.env.local scripts/verify-model.mjs --deepseek --calendar",
     "demo:study": "node --disable-warning=ExperimentalWarning scripts/demo-study.mjs",
     "test": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1",
     "check": "node --disable-warning=ExperimentalWarning scripts/check.mjs"

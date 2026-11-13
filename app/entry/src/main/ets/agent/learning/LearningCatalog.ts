@@ -1,4 +1,5 @@
-import type { LearnerProfile, LearningPath, LearningTask } from '../../contracts/LearningModels';
+import type { LearnerProfile, LearningPath, LearningTask, LearningTaskDraft } from '../../contracts/LearningModels';
+import { validateTimestamp } from './LearningScheduler';
 
 interface WeekContent {
   learn: string;
@@ -82,6 +83,52 @@ export function buildLearningTasks(profile: LearnerProfile, pathId: string): Lea
       completionCriteria: content.practiceCriteria, dependsOn: [learnId], dueAt: '', status: 'pending' });
   }
   return tasks;
+}
+
+export function validateTaskDraft(profile: LearnerProfile, pathId: string, startAt: string,
+  drafts: LearningTaskDraft[]): LearningTask[] {
+  const invalid = 'INVALID_TASK_DRAFT: 请提供每周的具体任务、预计分钟、完成标准和有效的前置任务；任务合计不能超过该周预算。';
+  if (!Array.isArray(drafts) || drafts.length < profile.weeks || drafts.length > 16) { throw new Error(invalid); }
+  const startsAt = validateTimestamp(startAt);
+  const byId: Map<string, LearningTaskDraft> = new Map<string, LearningTaskDraft>();
+  const totals: number[] = new Array<number>(profile.weeks).fill(0);
+  const allowed = ['id', 'title', 'phase', 'week', 'estimatedMinutes', 'completionCriteria', 'dependsOn', 'dueAt'];
+  for (const task of drafts) {
+    if (task === null || typeof task !== 'object' || Array.isArray(task) ||
+      Object.keys(task).some((key) => !allowed.includes(key)) ||
+      typeof task.id !== 'string' || !/^[a-z][a-z0-9_-]{0,39}$/.test(task.id) || byId.has(task.id) ||
+      !validDraftText(task.title, 120) || !validDraftText(task.phase, 60) || !validDraftText(task.completionCriteria, 300) ||
+      !Number.isInteger(task.week) || task.week < 1 || task.week > profile.weeks ||
+      !Number.isInteger(task.estimatedMinutes) || task.estimatedMinutes < 1 ||
+      !Array.isArray(task.dependsOn) || task.dependsOn.length >= drafts.length ||
+      new Set<string>(task.dependsOn).size !== task.dependsOn.length) { throw new Error(invalid); }
+    if (task.dueAt !== undefined) {
+      let due: number;
+      try { due = validateTimestamp(task.dueAt); } catch { throw new Error(invalid); }
+      if (due < startsAt + (task.week - 1) * 604800000 + task.estimatedMinutes * 60000) { throw new Error(invalid); }
+    }
+    byId.set(task.id, task);
+    totals[task.week - 1] += task.estimatedMinutes;
+  }
+  if (totals.some((total) => total < 1 || total > profile.minutesPerWeek)) { throw new Error(invalid); }
+  const accepted: Set<string> = new Set<string>();
+  const tasks: LearningTask[] = [];
+  for (const task of drafts) {
+    for (const id of task.dependsOn) {
+      const dependency = byId.get(id);
+      if (!accepted.has(id) || dependency === undefined || dependency.week > task.week) { throw new Error(invalid); }
+    }
+    accepted.add(task.id);
+    tasks.push({ id: pathId + '-draft-' + task.id, title: task.title.trim(), phase: task.phase.trim(), week: task.week,
+      estimatedMinutes: task.estimatedMinutes, remainingMinutes: task.estimatedMinutes,
+      completionCriteria: task.completionCriteria.trim(), dependsOn: task.dependsOn.map((id) => pathId + '-draft-' + id),
+      dueAt: task.dueAt ?? '', status: 'pending' });
+  }
+  return tasks;
+}
+
+function validDraftText(value: string, maximum: number): boolean {
+  return typeof value === 'string' && value.trim().length > 0 && Array.from(value.trim()).length <= maximum;
 }
 
 // 以下均为可调整的体验任务提案，不包含岗位资格或院校考试要求的事实判断。
