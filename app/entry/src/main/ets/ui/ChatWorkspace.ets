@@ -262,6 +262,7 @@ export struct ChatWorkspace {
     if (this.runtime === null || this.busy || this.input.trim().length === 0) { return; }
     const text: string = this.input;
     const speechRequest: number = this.speechRequest;
+    let succeeded = false;
     this.busy = true;
     this.error = '';
     this.errorCode = '';
@@ -273,7 +274,7 @@ export struct ChatWorkspace {
         (state: AgentState) => { this.status = state; });
       this.messages = result.conversation.messages.slice();
       // 断网 / 鉴权失败 / 超时等模型失败时保留输入，恢复后可直接重发；只有成功才清空。
-      if (result.state === 'completed') { this.input = ''; }
+      if (result.state === 'completed') { this.input = ''; succeeded = true; }
       this.error = describeAgentError(result.error);
       this.errorCode = errorCodeOf(result.error);
       this.conversations = await this.runtime.sessions.list();
@@ -300,7 +301,11 @@ export struct ChatWorkspace {
         const saved: Conversation | null = await this.runtime.sessions.get(this.currentId);
         if (saved !== null) { this.messages = saved.messages.slice(); }
       } catch { /* 历史读取失败时保留当前界面并展示错误。 */ }
-    } finally { this.busy = false; }
+    } finally {
+      // 失败时把原文写回输入框，避免错误区重建过程中 TextArea 把内容丢掉。
+      if (!succeeded) { this.input = text; }
+      this.busy = false;
+    }
   }
 
   private async listen(): Promise<void> {

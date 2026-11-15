@@ -448,7 +448,9 @@ test('模型失败时输入框保留：submit 只在 completed 状态清空输�
   const submit = source.slice(start, end);
   const resets = [...submit.matchAll(/this\.input = '';/g)];
   assert.equal(resets.length, 1, 'submit 中只允许一处清空输入');
-  assert.match(submit, /if \(result\.state === 'completed'\) \{ this\.input = ''; \}/,
+  assert.match(submit, /if \(result\.state === 'completed'\) \{ this\.input = ''; succeeded = true; \}/,
     '清空输入必须受 completed 状态保护，失败时输入要留在输入框');
+  assert.match(submit, /if \(!succeeded\) \{ this\.input = text; \}/,
+    '失败路径必须在 finally 中把原文写回输入框');
   assert.match(submit, /模型失败时保留输入/, '保留输入的意图应有注释说明');
 });
