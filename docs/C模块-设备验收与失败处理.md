@@ -65,6 +65,35 @@ main 上模型适配层、设备 HTTP 端口、会话/学习数据/日历仓库�
 环境搭建见[真机环境搭建指南](真机环境搭建指南.md)。以下每一项都要记录**设备型号、系统版本、
 复现步骤、结果、脱敏截图/录屏**，并附实际源码提交；Node 检查不能代替。
 
+### 4.0 鸿蒙真机已自动完成的部分（2026-11-15，命令行证据）
+
+设备：**HUAWEI Mate 80 / VYG-AL00，HarmonyOS 7.0.0.109（API 26）**，UDID `6XE0225B18001474`。
+工具链 API 24 编译、设备 API 26，签名后安装成功，代差不构成阻碍。
+
+| # | 检查 | 命令 / 证据 | 结果 |
+| --- | --- | --- | --- |
+| #5 | 签名与安装 | 自动签名生成 `.cer/.csr/.p12/.p7b`；`ace build hap -r` → `entry-default-signed.hap`（800,642 B）；`hdc app install -r` → `install bundle successfully`；`bm dump -n` 有 `com.example.campusagent` | ✅ |
+| #5 | 启动 | `aa start -a EntryAbility -b com.example.campusagent` → `start ability successfully`；hilog `appStartMonitor e2e:630ms`，无崩溃 | ✅ |
+| #6-6 | 权限 | `bm dump` 列出 `ohos.permission.INTERNET / MICROPHONE / READ_CALENDAR / WRITE_CALENDAR` | ✅ 声明齐全 |
+| #6-5 | **密钥不落盘** | 扫描整个 `/data/app/el2/100/base/com.example.campusagent`：`grep -rInE 'sk-\|Bearer \|Authorization\|api_key\|apiKey\|token\|dashscope'` 无命中；目录下只有 `campus_agent_sessions_v1.json` 一个文件。源码里 `ModelSettings.apiKey` 注释「仅运行时注入」，UI 文案「密钥仅在本次运行中使用，重启后需重新配置」 | ✅ 结构性保证 + 设备实测 |
+| #7-2 | 存储路径/边界 | `FileKeyValueStore` 落盘在 `haps/entry/files/campus_agent_<key>.json`；源码 key 为 `sessions_v1`、`study_data_v1`，日历映射独立文件 | ✅ 三个 key 隔离 |
+| #7-4 | **损坏文件保护** | force-stop → 写入损坏 JSON `{"version":1,"conversations":[BROKEN` → 重启应用 → 拉回文件逐字节比对 `ORIGINAL_CORRUPT_FILE_UNCHANGED=True`（原文件**未被覆盖**）→ 恢复原文件并重启 | ✅ 核心安全行为 |
+| #7-1 | 会话文件可读性 | 拉回本地按 UTF-8 解析：`{"version":1,"conversations":[{...,"title":"新会话","messages":[]}]}`，JSON 有效（hdc shell 直接 `cat` 显示中文乱码只是终端编码，不是数据损坏） | ✅ |
+
+> 上述是**设备端真实证据**，但只覆盖「安装 / 启动 / 权限 / 存储结构与异常保护 / 凭据不落盘」。
+> **#6 的真实模型对话、#7 的多轮→重启→回看→删除 仍需人在应用 UI 上操作**，
+> 不能据此关闭 #6 / #7 整项。
+
+**在手机上填模型配置**（本机只有 DashScope 兼容密钥，没有 DeepSeek 官方密钥，
+所以不要点面板里的「填入 DeepSeek 官方配置」）：
+
+```text
+接口地址  https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions
+模型名称  qwen-plus
+API Key   取自 E:\Deepseek Harness\华为项目\.secrets\dashscope.env 的 MODEL_API_KEY
+          （只填进应用密码框，不写进仓库、文档、日志或截图）
+```
+
 ### #6 应用内真实模型调用（鸿蒙 + Android 各一遍）
 
 1. 应用内「模型设置」→ 填入 DeepSeek 官方配置或兼容接口 → 输入运行时密钥 → 应用云端配置。
