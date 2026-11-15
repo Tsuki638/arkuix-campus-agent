@@ -272,7 +272,8 @@ export struct ChatWorkspace {
       const result: AgentResult = await this.runtime.agent.send(this.currentId, text,
         (state: AgentState) => { this.status = state; });
       this.messages = result.conversation.messages.slice();
-      this.input = '';
+      // 断网 / 鉴权失败 / 超时等模型失败时保留输入，恢复后可直接重发；只有成功才清空。
+      if (result.state === 'completed') { this.input = ''; }
       this.error = describeAgentError(result.error);
       this.errorCode = errorCodeOf(result.error);
       this.conversations = await this.runtime.sessions.list();

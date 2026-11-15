@@ -438,3 +438,17 @@ test('设备数据损坏时界面提示备份而非覆盖，原文件保持不�
   assert.equal(needsModelSettings(errorCodeOf(rawError)), false);
   assert.equal(await store.get('sessions_v1'), raw);
 });
+
+test('模型失败时输入框保留：submit 只在 completed 状态清空输入', async () => {
+  const file = path.join(workspace, 'app', 'entry', 'src', 'main', 'ets', 'ui', 'ChatWorkspace.ets');
+  const source = await readFile(file, 'utf8');
+  const start = source.indexOf('private async submit(');
+  const end = source.indexOf('private async listen(');
+  assert.ok(start >= 0 && end > start, '未能定位 submit 方法');
+  const submit = source.slice(start, end);
+  const resets = [...submit.matchAll(/this\.input = '';/g)];
+  assert.equal(resets.length, 1, 'submit 中只允许一处清空输入');
+  assert.match(submit, /if \(result\.state === 'completed'\) \{ this\.input = ''; \}/,
+    '清空输入必须受 completed 状态保护，失败时输入要留在输入框');
+  assert.match(submit, /模型失败时保留输入/, '保留输入的意图应有注释说明');
+});
