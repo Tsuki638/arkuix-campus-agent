@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <exclude domain="file" path="campus_agent_backend_session_v2.json" />
+    <exclude domain="file" path="campus_agent_backend_session_v2.json.tmp" />
+    <exclude domain="file" path="campus_agent_backend_device_v1.json" />
+    <exclude domain="file" path="campus_agent_backend_device_v1.json.tmp" />
+</full-backup-content>

@@ -53,7 +53,7 @@ foreach ($relative in @('build-profile.json5', 'hvigorfile.ts', 'oh-package.json
         Copy-Item -LiteralPath $source -Destination $target
     }
 }
-$etsRoot = Join-Path $repoRoot 'app\entry\src\main\ets'
+$etsRoot = Join-Path $repoRoot 'frontend\arkuix\entry\src\main\ets'
 $entryProfileFile = Join-Path $outputRoot 'entry\build-profile.json5'
 if (-not (Test-Path -LiteralPath (Join-Path $outputRoot 'entry\src\ohosTest\module.json5'))) {
     # 当前联调工程只构建应用目标；空模板的 ohosTest 目标需要其独立测试模块。

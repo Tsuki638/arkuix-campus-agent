@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 export const workspace = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-export const sourceRoot = path.join(workspace, 'app', 'entry', 'src', 'main', 'ets');
+export const sourceRoot = path.join(workspace, 'frontend', 'arkuix', 'entry', 'src', 'main', 'ets');
 const outputRoot = path.join(workspace, '.generated', 'core');
 
 async function sourceFiles(directory) {

@@ -1,9 +1,9 @@
 ﻿param([string]$AceCommand = 'ace')
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$appRoot = Join-Path $repoRoot 'app'
+$appRoot = Join-Path $repoRoot 'frontend\arkuix'
 if (Test-Path -LiteralPath (Join-Path $appRoot 'build-profile.json5')) {
-    Write-Output 'app 已有原生工程配置，无需重复初始化。'
+    Write-Output 'frontend/arkuix 已有原生工程配置，无需重复初始化。'
     exit 0
 }
 if (-not (Get-Command $AceCommand -ErrorAction SilentlyContinue)) {
@@ -39,5 +39,5 @@ Get-ChildItem -LiteralPath $generatedRoot -Recurse -File -Force | ForEach-Object
         }
     }
 }
-Write-Output '原生工程壳已合并到 app，共享业务与页面源码已保留。'
-Write-Output '请用 DevEco 打开 app，按 docs/构建与运行.md 检查 SDK、跨端 API、权限和签名，再构建两端。'
+Write-Output '原生工程壳已合并到 frontend/arkuix，共享业务与页面源码已保留。'
+Write-Output '请用 DevEco 打开 frontend/arkuix，按 docs/构建与运行.md 检查 SDK、跨端 API、权限和签名，再构建两端。'

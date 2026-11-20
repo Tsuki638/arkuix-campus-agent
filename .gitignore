@@ -5,8 +5,13 @@ oh_modules/
 .idea/
 **/build/
 **/.gradle/
+**/target/
+**/backend-data/
+.vscode/
+*.iml
+**/logs/
 **/assets/arkui-x/
-app/.arkui-x/android/app/libs/
+frontend/arkuix/.arkui-x/android/app/libs/
 **/local.properties
 **/local.*.json
 .env

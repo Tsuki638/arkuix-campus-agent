@@ -8,7 +8,7 @@ if (-not $TemplateProject) {
     }
 }
 if (-not $TemplateProject) { throw '请通过 -TemplateProject 指定同版本 SDK 创建的官方 ArkUI-X 空工程。' }
-$appRoot = Join-Path $repoRoot 'app'
+$appRoot = Join-Path $repoRoot 'frontend\arkuix'
 & (Join-Path $PSScriptRoot 'prepare-speech-demo.ps1') -TemplateProject $TemplateProject `
     -OutputDirectory $appRoot -StartPage Chat -BundleName 'com.example.campusagent' -AppName '学习规划助手'
 
@@ -41,5 +41,5 @@ if (Test-Path -LiteralPath $androidStrings) {
     $content = $content -replace '(<string name="app_name">)[^<]*(</string>)', '${1}学习规划助手${2}'
     [System.IO.File]::WriteAllText($androidStrings, $content, [System.Text.UTF8Encoding]::new($false))
 }
-Write-Output '整合工程位于 app/，共享聊天、学习计划、模型设置和语音使用同一份源码。'
-Write-Output '用 DevEco 打开 app/；鸿蒙和 Android 安装运行结果需分别验收。'
+Write-Output '整合工程位于 frontend/arkuix/，共享聊天、学习计划、模型设置和语音使用同一份源码。'
+Write-Output '用 DevEco 打开 frontend/arkuix/；鸿蒙和 Android 安装运行结果需分别验收。'

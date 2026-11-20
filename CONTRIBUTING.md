@@ -1,5 +1,9 @@
 # 四人协作开发说明
 
+当前工程已调整为前后端分离结构：DevEco 打开 `frontend/arkuix/`，Java 工程位于 `backend/`，跨进程协议以 `contracts/openapi.yaml` 为准。原有 Agent、模型与仓库暂时保留在客户端，下面的四人分工仍描述现有端侧实现；Java 业务迁移安排以[工程架构与迁移](docs/工程架构与迁移.md)为准。
+
+修改客户端运行 `npm.cmd run check`，修改 Java 端运行 `npm.cmd run test:backend`，同时修改两侧运行 `npm.cmd run check:all`。新增 HTTP 接口时同步 OpenAPI、Java DTO 和 ArkTS 调用类型。设备适配和 UI 改动仍需原生构建与设备验收。
+
 ## 获取代码
 
 ```bash
@@ -14,10 +18,10 @@ npm run check
 
 | 成员 | 建议分支 | 主要目录 |
 | --- | --- | --- |
-| A | `feat/agent` | `app/entry/src/main/ets/agent/` |
-| B | `feat/ui` | `app/entry/src/main/ets/ui/`、`pages/` |
-| C | `feat/services` | `app/entry/src/main/ets/services/` |
-| 你（D，语音模块） | `feat/platform` | `app/entry/src/main/ets/platform/speech/`、语音自测页、语音检查与准备脚本 |
+| A | `feat/agent` | `frontend/arkuix/entry/src/main/ets/agent/` |
+| B | `feat/ui` | `frontend/arkuix/entry/src/main/ets/ui/`、`pages/` |
+| C | `feat/services` | `frontend/arkuix/entry/src/main/ets/services/` |
+| 你（D，语音模块） | `feat/platform` | `frontend/arkuix/entry/src/main/ets/platform/speech/`、语音自测页、语音检查与准备脚本 |
 
 当前分工以 [分工说明](docs/四人分工与里程碑.md) 为准：A 负责 Agent，B 负责 UI，C 负责模型与数据，你负责语音模块。平台工程、日历适配与构建打包的负责人另行明确。[Word 任务文档](docs/项目四人分工与具体任务.docx) 为历史导出，人员分工可能尚未同步。
 

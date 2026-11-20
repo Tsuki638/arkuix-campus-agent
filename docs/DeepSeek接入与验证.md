@@ -10,11 +10,11 @@
 | 模型 ID | `deepseek-flash` |
 | 思考模式 | `thinking: { type: 'disabled' }` |
 | 单次最大输出 | `max_tokens: 2048` |
-| 密钥 | 本机 `.env.local` 中的 `DEEPSEEK_API_KEY`；应用内通过密码输入框提供 |
+| 密钥 | 本机 `.env.local` 中的 `DEEPSEEK_API_KEY`，由准备脚本注入忽略的资源配置；应用内可临时覆盖 |
 
-默认配置集中在 `app/entry/src/main/ets/services/model/DeepSeekConfig.ts`。根据[官方接入文档](https://api-docs.deepseek.com/)选择当前模型，并按[官方工具调用示例](https://api-docs.deepseek.com/guides/tool_calls/)显式使用非思考模式。当前适配器尚未保存和回传思考模式所需的推理字段，不能直接启用该模式。
+默认配置集中在 `frontend/arkuix/entry/src/main/ets/services/model/DeepSeekConfig.ts`。根据[官方接入文档](https://api-docs.deepseek.com/)选择当前模型，并按[官方工具调用示例](https://api-docs.deepseek.com/guides/tool_calls/)显式使用非思考模式。DeepSeek 继续使用非思考模式；新增的推理字段回传用于 Kimi/GLM。
 
-供应商参数只对官方 `api.deepseek.com` 主机启用，其他兼容接口沿用通用请求格式。第三方中转需按其实际协议另行验证。
+供应商参数按各家官方主机隔离。DeepSeek 默认参数只用于官方 `api.deepseek.com`，不会发送给其他服务。第三方中转需按其实际协议另行验证。
 
 ## 本机复测
 
@@ -50,12 +50,14 @@ npm.cmd run verify:deepseek
 
 ## 应用内使用
 
-1. 用 DevEco 打开项目的 `app/`，运行更新后的共享页面。
-2. 手机端先打开左上角侧栏，进入“模型设置”。
-3. 点击“填入 DeepSeek 官方配置”，自动填入接口和模型；输入 API Key，点击“应用云端配置”。
+1. 执行 `npm.cmd run prepare:model`，用 DevEco 打开项目的 `frontend/arkuix/` 并运行共享页面。
+2. 启动直接使用本机默认 DeepSeek。需要更换型号时打开左上角侧栏，进入“模型设置”。
+3. 选择 DeepSeek 和所需型号，默认密钥可留空沿用，点击“使用此模型”。其他服务商填写各自的 API Key。
 4. 发送“请为复习高数制定 3 天计划”，查看模型回复与“学习计划”中的任务，再追问此前计划的科目和天数。
 
-`.env.local` 仅供电脑上的 Node 验证命令读取，应用仍通过设置页接收运行时密钥；应用重启后需重新配置。切换到官方配置时会清空输入框中的旧密钥，避免切换服务商时沿用错误凭据。
+准备脚本将 `.env.local` 转为被 Git 忽略的 `rawfile/local.model.json`，应用重启自动读取。手动输入的临时密钥不持久化，切换服务商会清空输入。打包配置的凭据管理及全部预设见[模型选择与默认配置](模型选择与默认配置.md)。
+
+2026-11-17 再次复测：本机现有密钥完成 3 次真实请求，工具计划、多轮记忆及仓库恢复通过；53 项自动化检查和 API 24 HAP 构建通过。
 
 本次 HDC 未发现连接的设备或模拟器，尚未完成应用内真实联网与设备文件恢复验证。设备就绪后，需补齐上述操作、断网反馈、退出重启回看与语音闭环。
 

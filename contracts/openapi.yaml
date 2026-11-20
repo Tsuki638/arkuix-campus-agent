@@ -1,0 +1,898 @@
+openapi: 3.1.0
+info:
+  title: Campus Agent API
+  version: 0.3.0
+  description: >-
+    ArkUI-X 与 Java 后端的联调、账号、会话、Agent、学习计划及设备日历协议。
+servers:
+  - url: http://127.0.0.1:8080
+    description: 本机回环开发。设备连接远程服务时使用 HTTPS。
+  - url: https://api.kaleteam.cn
+    description: 云服务器 HTTPS 入口。
+tags:
+  - name: System
+  - name: Operations
+  - name: Workspace
+  - name: Account
+paths:
+  /api/v1/system/info:
+    get:
+      tags: [System]
+      operationId: getSystemInfo
+      summary: 获取后端应用信息，验证前后端连接
+      responses:
+        '200':
+          description: 统一成功响应
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SystemInfoResponse'
+              example:
+                code: OK
+                message: success
+                data:
+                  application: campus-agent-backend
+                  apiVersion: v1
+                  architecture: frontend-backend-separated
+                  phase: business
+        default:
+          $ref: '#/components/responses/ApiError'
+  /actuator/health:
+    get:
+      tags: [Operations]
+      operationId: getHealth
+      summary: 服务健康检查，使用 Actuator 原生格式
+      responses:
+        '200':
+          description: 服务正常
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+              example:
+                status: UP
+        '503':
+          description: 服务异常
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+  /api/v1/auth/register:
+    post:
+      tags: [Account]
+      operationId: registerAccount
+      summary: 注册账号并登录当前设备
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Credentials' }
+      responses:
+        '201':
+          description: 账号操作成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/WorkspaceSuccess'
+                  - properties:
+                      data: { $ref: '#/components/schemas/AccountSession' }
+        default:
+          $ref: '#/components/responses/ApiError'
+  /api/v1/auth/login:
+    post:
+      tags: [Account]
+      operationId: loginAccount
+      summary: 登录账号并创建当前设备会话
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Credentials' }
+      responses:
+        '200':
+          description: 账号操作成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/WorkspaceSuccess'
+                  - properties:
+                      data: { $ref: '#/components/schemas/AccountSession' }
+        default:
+          $ref: '#/components/responses/ApiError'
+  /api/v1/auth/me:
+    get:
+      tags: [Account]
+      operationId: getAccount
+      summary: 读取当前登录用户
+      security: [{ BearerSession: [] }]
+      responses:
+        '200':
+          description: 账号操作成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/WorkspaceSuccess'
+                  - properties:
+                      data: { $ref: '#/components/schemas/AccountUser' }
+        default:
+          $ref: '#/components/responses/ApiError'
+  /api/v1/auth/logout:
+    post:
+      tags: [Account]
+      operationId: logoutAccount
+      summary: 撤销当前设备的登录会话
+      security: [{ BearerSession: [] }]
+      responses:
+        '200':
+          description: 账号操作成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/WorkspaceSuccess'
+                  - properties:
+                      data: { type: 'null' }
+        default:
+          $ref: '#/components/responses/ApiError'
+  /api/v1/workspace/model:
+    get:
+      tags: [Workspace]
+      security: [{ BearerSession: [] }]
+      operationId: getWorkspaceModel
+      summary: 读取服务端默认模型配置状态
+      responses:
+        '200':
+          description: 业务操作成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/WorkspaceSuccess'
+                  - properties:
+                      data: {"$ref":"#/components/schemas/ModelStatus"}
+        default:
+          $ref: '#/components/responses/ApiError'
+  /api/v1/workspace/model/validate:
+    post:
+      tags: [Workspace]
+      security: [{ BearerSession: [] }]
+      operationId: validateWorkspaceModel
+      summary: 校验运行时模型设置
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ModelSettings' }
+      responses:
+        '200':
+          description: 业务操作成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/WorkspaceSuccess'
+                  - properties:
+                      data: {"$ref":"#/components/schemas/ModelStatus"}
+        default:
+          $ref: '#/components/responses/ApiError'
+  /api/v1/workspace/model/preference:
+    get:
+      tags: [Workspace]
+      security: [{ BearerSession: [] }]
+      operationId: getModelPreference
+      summary: 读取当前账号保存的模型选择和配置状态
+      responses:
+        '200':
+          $ref: '#/components/responses/ModelPreference'
+        default:
+          $ref: '#/components/responses/ApiError'
+    put:
+      tags: [Workspace]
+      security: [{ BearerSession: [] }]
+      operationId: updateModelPreference
+      summary: 保存当前账号的模型选择
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateModelPreference' }
+      responses:
+        '200':
+          $ref: '#/components/responses/ModelPreference'
+        default:
+          $ref: '#/components/responses/ApiError'
+  /api/v1/workspace/import:
+    get:
+      tags: [Workspace]
+      security: [{ BearerSession: [] }]
+      operationId: getWorkspaceImport
+      summary: 查询本设备是否已导入历史
+      responses:
+        '200':
+          description: 业务操作成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/WorkspaceSuccess'
+                  - properties:
+                      data: {"type":"boolean"}
+        default:
+          $ref: '#/components/responses/ApiError'
+    post:
+      tags: [Workspace]
+      security: [{ BearerSession: [] }]
+      operationId: importWorkspace
+      summary: 用户确认后将旧设备或旧服务端工作区记录导入当前账号
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LegacyData' }
+      responses:
+        '200':
+          description: 业务操作成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/WorkspaceSuccess'
+                  - properties:
+                      data: {"type":"null"}
+        default:
+          $ref: '#/components/responses/ApiError'
+  /api/v1/workspace/conversations:
+    get:
+      tags: [Workspace]
+      security: [{ BearerSession: [] }]
+      operationId: listConversations
+      summary: 按更新时间倒序查询会话
+      responses:
+        '200':
+          description: 业务操作成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/WorkspaceSuccess'
+                  - properties:
+                      data: {"type":"array","items":{"$ref":"#/components/schemas/Conversation"}}
+        default:
+          $ref: '#/components/responses/ApiError'
+    post:
+      tags: [Workspace]
+      security: [{ BearerSession: [] }]
+      operationId: createConversation
+      summary: 创建空会话
+      responses:
+        '201':
+          description: 业务操作成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/WorkspaceSuccess'
+                  - properties:
+                      data: {"$ref":"#/components/schemas/Conversation"}
+        default:
+          $ref: '#/components/responses/ApiError'
+  /api/v1/workspace/conversations/{id}:
+    get:
+      tags: [Workspace]
+      security: [{ BearerSession: [] }]
+      operationId: getConversation
+      summary: 查询会话及历史消息
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: 业务操作成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/WorkspaceSuccess'
+                  - properties:
+                      data: {"$ref":"#/components/schemas/Conversation"}
+        default:
+          $ref: '#/components/responses/ApiError'
+    delete:
+      tags: [Workspace]
+      security: [{ BearerSession: [] }]
+      operationId: deleteConversation
+      summary: 删除会话及历史消息
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: 业务操作成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/WorkspaceSuccess'
+                  - properties:
+                      data: {"type":"null"}
+        default:
+          $ref: '#/components/responses/ApiError'
+  /api/v1/workspace/conversations/{id}/turns:
+    post:
+      tags: [Workspace]
+      security: [{ BearerSession: [] }]
+      operationId: submitConversationTurn
+      summary: 保存输入并开始处理，同一请求标识可安全重发
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SendTurn' }
+      responses:
+        '202':
+          description: 业务操作成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/WorkspaceSuccess'
+                  - properties:
+                      data: {"$ref":"#/components/schemas/Turn"}
+        default:
+          $ref: '#/components/responses/ApiError'
+  /api/v1/workspace/conversations/{id}/turns/{requestId}:
+    get:
+      tags: [Workspace]
+      security: [{ BearerSession: [] }]
+      operationId: getConversationTurn
+      summary: 轮询处理状态或读取本轮结果
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - $ref: '#/components/parameters/RequestId'
+      responses:
+        '200':
+          description: 业务操作成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/WorkspaceSuccess'
+                  - properties:
+                      data: {"$ref":"#/components/schemas/Turn"}
+        default:
+          $ref: '#/components/responses/ApiError'
+  /api/v1/workspace/plans:
+    get:
+      tags: [Workspace]
+      security: [{ BearerSession: [] }]
+      operationId: listStudyPlans
+      summary: 查询计划和任务
+      responses:
+        '200':
+          description: 业务操作成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/WorkspaceSuccess'
+                  - properties:
+                      data: {"type":"array","items":{"$ref":"#/components/schemas/StudyPlan"}}
+        default:
+          $ref: '#/components/responses/ApiError'
+  /api/v1/workspace/plans/{id}/tasks/{taskId}/completion:
+    put:
+      tags: [Workspace]
+      security: [{ BearerSession: [] }]
+      operationId: setTaskCompletion
+      summary: 设置任务完成状态，重复完成请求只记录一次打卡
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - $ref: '#/components/parameters/TaskId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Completion' }
+      responses:
+        '200':
+          description: 业务操作成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/WorkspaceSuccess'
+                  - properties:
+                      data: {"type":"null"}
+        default:
+          $ref: '#/components/responses/ApiError'
+  /api/v1/workspace/plans/{id}/records:
+    get:
+      tags: [Workspace]
+      security: [{ BearerSession: [] }]
+      operationId: listStudyRecords
+      summary: 查询计划的打卡记录
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: 业务操作成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/WorkspaceSuccess'
+                  - properties:
+                      data: {"type":"array","items":{"$ref":"#/components/schemas/StudyRecord"}}
+        default:
+          $ref: '#/components/responses/ApiError'
+  /api/v1/workspace/calendar/drafts:
+    get:
+      tags: [Workspace]
+      security: [{ BearerSession: [] }]
+      operationId: listCalendarDrafts
+      summary: 查询日历草案和设备写入结果
+      responses:
+        '200':
+          description: 业务操作成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/WorkspaceSuccess'
+                  - properties:
+                      data: {"type":"array","items":{"$ref":"#/components/schemas/CalendarDraft"}}
+        default:
+          $ref: '#/components/responses/ApiError'
+    post:
+      tags: [Workspace]
+      security: [{ BearerSession: [] }]
+      operationId: prepareCalendarDraft
+      summary: 生成待确认草案
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PrepareDraft' }
+      responses:
+        '200':
+          description: 业务操作成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/WorkspaceSuccess'
+                  - properties:
+                      data: {"$ref":"#/components/schemas/CalendarDraft"}
+        default:
+          $ref: '#/components/responses/ApiError'
+  /api/v1/workspace/calendar/drafts/{id}/events/{eventId}:
+    put:
+      tags: [Workspace]
+      security: [{ BearerSession: [] }]
+      operationId: editCalendarEvent
+      summary: 修改当前版本的日历草案条目
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - $ref: '#/components/parameters/EventId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EditEvent' }
+      responses:
+        '200':
+          description: 业务操作成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/WorkspaceSuccess'
+                  - properties:
+                      data: {"$ref":"#/components/schemas/CalendarDraft"}
+        default:
+          $ref: '#/components/responses/ApiError'
+  /api/v1/workspace/calendar/drafts/{id}/cancel:
+    post:
+      tags: [Workspace]
+      security: [{ BearerSession: [] }]
+      operationId: cancelCalendarDraft
+      summary: 取消余下的设备写入并保存结果
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Revision' }
+      responses:
+        '200':
+          description: 业务操作成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/WorkspaceSuccess'
+                  - properties:
+                      data: {"$ref":"#/components/schemas/CalendarDraft"}
+        default:
+          $ref: '#/components/responses/ApiError'
+  /api/v1/workspace/calendar/drafts/{id}/events/{eventId}/claim:
+    post:
+      tags: [Workspace]
+      security: [{ BearerSession: [] }]
+      operationId: claimCalendarEvent
+      summary: 由确认设备保存当前条目的写入意图
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - $ref: '#/components/parameters/EventId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Revision' }
+      responses:
+        '200':
+          description: 业务操作成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/WorkspaceSuccess'
+                  - properties:
+                      data: {"$ref":"#/components/schemas/CalendarDraft"}
+        default:
+          $ref: '#/components/responses/ApiError'
+  /api/v1/workspace/calendar/drafts/{id}/events/{eventId}/receipt:
+    post:
+      tags: [Workspace]
+      security: [{ BearerSession: [] }]
+      operationId: saveCalendarReceipt
+      summary: 保存确认设备的逐项执行回执
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - $ref: '#/components/parameters/EventId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Receipt' }
+      responses:
+        '200':
+          description: 业务操作成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/WorkspaceSuccess'
+                  - properties:
+                      data: {"$ref":"#/components/schemas/CalendarDraft"}
+        default:
+          $ref: '#/components/responses/ApiError'
+  /api/v1/workspace/calendar/drafts/{id}/result:
+    post:
+      tags: [Workspace]
+      security: [{ BearerSession: [] }]
+      operationId: recordCalendarDraftResult
+      summary: 幂等保存当前草案版本的聊天回执
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Revision' }
+      responses:
+        '200':
+          description: 业务操作成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/WorkspaceSuccess'
+                  - properties:
+                      data: {"$ref":"#/components/schemas/CalendarDraft"}
+        default:
+          $ref: '#/components/responses/ApiError'
+components:
+  securitySchemes:
+    BearerSession:
+      type: http
+      scheme: bearer
+      description: 注册或登录返回的设备会话令牌。服务端依据令牌确定账号和设备。
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema: {"type":"string"}
+    RequestId:
+      name: requestId
+      in: path
+      required: true
+      schema: {"type":"string"}
+    EventId:
+      name: eventId
+      in: path
+      required: true
+      schema: {"type":"string"}
+    TaskId:
+      name: taskId
+      in: path
+      required: true
+      schema: {"type":"string"}
+  responses:
+    ModelPreference:
+      description: 当前账号的模型选择和配置状态
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/WorkspaceSuccess'
+              - properties:
+                  data: { $ref: '#/components/schemas/ModelPreference' }
+    ApiError:
+      description: 错误使用相应 HTTP 状态码与统一错误响应
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+  schemas:
+    Credentials:
+      type: object
+      required: [username, password, deviceId]
+      properties:
+        username: { type: string, pattern: '^[A-Za-z0-9_-]{3,32}$' }
+        password: { type: string, minLength: 8, maxLength: 128, writeOnly: true }
+        deviceId: { type: string, format: uuid }
+    AccountUser:
+      type: object
+      required: [username]
+      properties:
+        username: { type: string }
+    AccountSession:
+      type: object
+      required: [user, token, expiresAt]
+      properties:
+        user: { $ref: '#/components/schemas/AccountUser' }
+        token: { type: string }
+        expiresAt: { type: integer, description: Unix 毫秒时间戳 }
+    WorkspaceSuccess:
+      type: object
+      required: [code, message, data]
+      properties:
+        code: { const: OK }
+        message: { type: string }
+        data: {}
+    ModelStatus:
+      type: object
+      required: [endpoint, model, configured]
+      properties:
+        endpoint: {"type":"string"}
+        model: {"type":"string"}
+        configured: {"type":"boolean"}
+    ModelSettings:
+      type: object
+      required: [endpoint, model]
+      properties:
+        endpoint: {"type":"string"}
+        model: {"type":"string"}
+        apiKey: {"type":"string","writeOnly":true}
+    ModelPreference:
+      type: object
+      required: [mode, defaultModel, customModel]
+      properties:
+        mode: { type: string, enum: [default, custom] }
+        defaultModel: { $ref: '#/components/schemas/ModelStatus' }
+        customModel:
+          oneOf:
+            - $ref: '#/components/schemas/ModelStatus'
+            - type: 'null'
+    UpdateModelPreference:
+      type: object
+      required: [mode]
+      properties:
+        mode: { type: string, enum: [default, custom] }
+        customModel:
+          description: 自定义模式的配置。同一接口已保存密钥时可以省略 API Key。
+          $ref: '#/components/schemas/ModelSettings'
+    SendTurn:
+      type: object
+      required: [requestId, text]
+      properties:
+        requestId: {"type":"string","pattern":"^[A-Za-z0-9_-]{1,100}$"}
+        text: {"type":"string"}
+        settings: {"$ref":"#/components/schemas/ModelSettings"}
+        useSavedModel: { type: boolean, default: false, description: 使用账号保存的模型选择。 }
+    Turn:
+      type: object
+      required: [state, reply, error, conversation]
+      properties:
+        state: {"enum":["thinking","using_tool","completed","failed"]}
+        reply: {"type":"string"}
+        error: {"type":"string"}
+        conversation: {"oneOf":[{"$ref":"#/components/schemas/Conversation"},{"type":"null"}]}
+    Conversation:
+      type: object
+      required: [id, title, messages, updatedAt]
+      properties:
+        id: {"type":"string"}
+        title: {"type":"string"}
+        messages: {"type":"array","items":{"$ref":"#/components/schemas/ChatMessage"}}
+        updatedAt: {"type":"integer"}
+        summary: {"$ref":"#/components/schemas/Summary"}
+    ChatMessage:
+      type: object
+      required: [id, role, content, createdAt, toolCalls, toolCallId]
+      properties:
+        id: {"type":"string"}
+        role: {"enum":["system","user","assistant","tool"]}
+        content: {"type":"string"}
+        createdAt: {"type":"integer"}
+        toolCalls: {"type":"array","items":{"$ref":"#/components/schemas/ToolCall"}}
+        toolCallId: {"type":"string"}
+        reasoningContent: {"type":"string"}
+        reasoningScope: {"type":"string"}
+    Summary:
+      type: object
+      required: [text, throughMessageId]
+      properties:
+        text: {"type":"string"}
+        throughMessageId: {"type":"string"}
+    ToolCall:
+      type: object
+      required: [id, name, input]
+      properties:
+        id: {"type":"string"}
+        name: {"type":"string"}
+        input: {"type":"string"}
+    StudyPlan:
+      type: object
+      required: [id, conditions, tasks, createdAt]
+      properties:
+        id: {"type":"string"}
+        conditions: {"$ref":"#/components/schemas/StudyConditions"}
+        tasks: {"type":"array","items":{"$ref":"#/components/schemas/StudyTask"}}
+        createdAt: {"type":"integer"}
+    StudyConditions:
+      type: object
+      required: [goal, dailyMinutes, startDate]
+      properties:
+        goal: {"type":"string"}
+        dailyMinutes: {"type":"integer"}
+        startDate: {"type":"string"}
+    StudyTask:
+      type: object
+      required: [id, title, day, status]
+      properties:
+        id: {"type":"string"}
+        title: {"type":"string"}
+        day: {"type":"integer"}
+        status: {"enum":["pending","done"]}
+    Completion:
+      type: object
+      required: [completed]
+      properties:
+        completed: {"type":"boolean"}
+    StudyRecord:
+      type: object
+      required: [planId, taskId, completedAt]
+      properties:
+        planId: {"type":"string"}
+        taskId: {"type":"string"}
+        completedAt: {"type":"integer"}
+    CalendarDraft:
+      type: object
+      required: [id, conversationId, planId, revision, createdAt, status, events]
+      properties:
+        id: {"type":"string"}
+        conversationId: {"type":"string"}
+        planId: {"type":"string"}
+        revision: {"type":"integer"}
+        createdAt: {"type":"integer"}
+        status: {"enum":["pending","completed","cancelled"]}
+        events: {"type":"array","items":{"$ref":"#/components/schemas/CalendarEvent"}}
+    CalendarEvent:
+      type: object
+      required: [id, taskId, title, startTime, endTime, timeZone, reminderMinutes, description, state, calendarId, eventId, error]
+      properties:
+        id: {"type":"string"}
+        taskId: {"type":"string"}
+        title: {"type":"string"}
+        startTime: {"type":"integer"}
+        endTime: {"type":"integer"}
+        timeZone: {"const":"Asia/Shanghai"}
+        reminderMinutes: {"type":"array","items":{"type":"integer"}}
+        description: {"type":"string"}
+        state: {"enum":["pending","writing","created","failed","uncertain"]}
+        calendarId: {"type":"integer"}
+        eventId: {"type":"integer"}
+        error: {"type":"string"}
+    CalendarEventInput:
+      type: object
+      required: [title, startTime, endTime, reminderMinutes]
+      properties:
+        title: {"type":"string","maxLength":200}
+        startTime: {"type":"string","description":"北京时间 ISO 8601，包含 +08:00"}
+        endTime: {"type":"string","description":"北京时间 ISO 8601，包含 +08:00"}
+        reminderMinutes: {"type":"array","maxItems":3,"items":{"type":"integer","minimum":0,"maximum":10080}}
+        taskId: {"type":"string"}
+        description: {"type":"string"}
+    PrepareDraft:
+      type: object
+      required: [conversationId, events]
+      properties:
+        conversationId: {"type":"string"}
+        planId: {"type":"string"}
+        events: {"type":"array","minItems":1,"maxItems":30,"items":{"$ref":"#/components/schemas/CalendarEventInput"}}
+    EditEvent:
+      type: object
+      required: [revision, input]
+      properties:
+        revision: {"type":"integer","minimum":1}
+        input: {"$ref":"#/components/schemas/CalendarEventInput"}
+    Receipt:
+      type: object
+      required: [revision, state]
+      properties:
+        revision: {"type":"integer","minimum":1}
+        state: {"enum":["created","failed","uncertain"]}
+        calendarId: {"type":"integer"}
+        eventId: {"type":"integer"}
+    Revision:
+      type: object
+      required: [revision]
+      properties:
+        revision: {"type":"integer","minimum":1}
+    LegacyData:
+      type: object
+      required: [conversations, plans, records, drafts]
+      properties:
+        legacyWorkspaceKey: { type: string, writeOnly: true, description: 选填的旧服务端工作区标识 }
+        conversations: {"type":"array","items":{"$ref":"#/components/schemas/Conversation"}}
+        plans: {"type":"array","items":{"$ref":"#/components/schemas/StudyPlan"}}
+        records: {"type":"array","items":{"$ref":"#/components/schemas/StudyRecord"}}
+        drafts: {"type":"array","items":{"$ref":"#/components/schemas/CalendarDraft"}}
+    SystemInfo:
+      type: object
+      required: [application, apiVersion, architecture, phase]
+      properties:
+        application:
+          type: string
+        apiVersion:
+          type: string
+          const: v1
+        architecture:
+          type: string
+        phase:
+          type: string
+    SystemInfoResponse:
+      type: object
+      required: [code, message, data]
+      properties:
+        code:
+          type: string
+          const: OK
+        message:
+          type: string
+        data:
+          $ref: '#/components/schemas/SystemInfo'
+    ErrorResponse:
+      type: object
+      required: [code, message, data]
+      properties:
+        code:
+          type: string
+          description: NOT_FOUND、METHOD_NOT_ALLOWED、INVALID_REQUEST、INTERNAL_ERROR 或业务错误码
+        message:
+          type: string
+        data:
+          type: 'null'
+    Health:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string

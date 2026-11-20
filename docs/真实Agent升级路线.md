@@ -7,7 +7,7 @@
 - `AgentEngine` 已有多轮会话、模型与工具执行循环、工具结果回传、执行步数限制、并发保护和失败反馈。
 - `CompatibleModelClient` 已映射 Chat Completions 的消息与工具协议；`OhosJsonTransport` 已实现设备 HTTP 请求和鉴权头。
 - 会话、基础计划和打卡已有本地仓库，界面已接模型设置、计划回看与完成状态。
-- 当前启动时未传模型配置，默认创建 `MockModelClient`；应用模型设置后，本次运行可以使用云端适配器。重启后默认回到离线模式。
+- 2026-11-17 已移除应用内模拟模型，启动默认读取本机 DeepSeek；设置页预设五家服务及自定义接口，重启恢复本机构建默认配置，见[模型选择与默认配置](模型选择与默认配置.md)。
 - 当前已注册 `create_study_plan`、`prepare_calendar_events`、`list_calendar_drafts` 和 `list_study_plans`。基础计划仍使用模板任务；日历工具可准备明确时段的草案并读取执行记录，鸿蒙端由用户确认后调用系统接口，设备效果待验收。
 
 工具调用需要模型返回工具名称与参数，由应用执行并将结果送回模型继续处理。现有循环已经覆盖这种基本交互，参考[百炼 Function Calling 官方说明](https://help.aliyun.com/zh/model-studio/qwen-function-calling)。
